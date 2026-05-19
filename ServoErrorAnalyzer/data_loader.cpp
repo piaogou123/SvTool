@@ -45,7 +45,8 @@ bool DataLoader::loadCsv(const QString &filePath, Dataset &out, QString *error)
             QString axisName = m.captured(2);          // e.g. "X", "A", "Z"
             bool isCmd = (m.captured(1) == "l");    // "l" = command, "f" = feedback
             colMap[ci] = { axisName, isCmd ? RoleCmd : RoleFb };
-        } else if (h.compare("FINISHED", Qt::CaseInsensitive) == 0) {
+        } else if (h.compare("FINISHED", Qt::CaseInsensitive) == 0
+                   || h.compare("TIME", Qt::CaseInsensitive) == 0) {
             timeCol = ci;
         }
     }
