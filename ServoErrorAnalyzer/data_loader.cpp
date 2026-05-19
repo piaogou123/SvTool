@@ -161,7 +161,8 @@ bool DataLoader::loadCsv(const QString &filePath, Dataset &out, QString *error)
 // --- Response-time computation -----------------------------------------
 
 // Find indices where the command signal changes direction (peaks/valleys).
-// The returned indices are the extrema — the last point before reversal.
+// Uses cumulative retreat from the running extremum, not single-step size,
+// so that gradual reversals are detected promptly.
 static QVector<int> findTurningPoints(const QVector<double> &cmd, double eps)
 {
     QVector<int> turns;
@@ -171,30 +172,44 @@ static QVector<int> findTurningPoints(const QVector<double> &cmd, double eps)
     int state = 0;               // 0=unknown, 1=up, -1=down
     double extremum = cmd[0];
     int extremumIdx = 0;
+    double startVal = cmd[0];
 
     for (int i = 1; i < n; ++i) {
-        double step = cmd[i] - cmd[i - 1];
-
-        if (step > eps) {
-            if (state == -1) {
-                turns.append(extremumIdx);
+        if (state == 0) {
+            // Use cumulative displacement from start to determine initial direction.
+            // Single-step threshold would miss slow accelerations from standstill.
+            double disp = cmd[i] - startVal;
+            if (disp > eps) {
+                state = 1;
                 extremum = cmd[i];
                 extremumIdx = i;
-            } else if (cmd[i] > extremum) {
-                extremum = cmd[i];
-                extremumIdx = i;
-            }
-            state = 1;
-        } else if (step < -eps) {
-            if (state == 1) {
-                turns.append(extremumIdx);
-                extremum = cmd[i];
-                extremumIdx = i;
-            } else if (cmd[i] < extremum) {
+            } else if (disp < -eps) {
+                state = -1;
                 extremum = cmd[i];
                 extremumIdx = i;
             }
-            state = -1;
+        } else if (state == 1) {
+            if (cmd[i] > extremum) {
+                extremum = cmd[i];
+                extremumIdx = i;
+            } else if (extremum - cmd[i] > eps) {
+                // Cumulative retreat from peak exceeds threshold → reversal
+                turns.append(extremumIdx);
+                state = -1;
+                extremum = cmd[i];
+                extremumIdx = i;
+            }
+        } else {  // state == -1
+            if (cmd[i] < extremum) {
+                extremum = cmd[i];
+                extremumIdx = i;
+            } else if (cmd[i] - extremum > eps) {
+                // Cumulative rise from valley exceeds threshold → reversal
+                turns.append(extremumIdx);
+                state = 1;
+                extremum = cmd[i];
+                extremumIdx = i;
+            }
         }
     }
 
