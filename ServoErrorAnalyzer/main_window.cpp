@@ -151,6 +151,7 @@ void MainWindow::setupResponseDock()
     m_scrollResp->setWidget(m_respContainer);
     outerLayout->addWidget(m_scrollResp, 1);
 
+    outer->setMinimumSize(230, 450);
     dock->setWidget(outer);
     addDockWidget(Qt::RightDockWidgetArea, dock);
 }
@@ -228,7 +229,7 @@ void MainWindow::onCursorMoved(double time, int idx,
     for (auto it = errors.begin(); it != errors.end(); ++it) {
         const QString &name = it.key();
         double err = it.value();
-        QString unit = (name == "C") ? "deg" : "mm";
+        QString unit = (name == "C" || name == "A") ? "deg" : "mm";
         QColor c = m_chartView->isSeriesVisible(name)
                        ? ChartView::axisColor(m_curData.axisOrder.indexOf(name))
                        : QColor(128, 128, 128);

@@ -261,9 +261,9 @@ static void computeOneAxis(const QVector<double> &time,
     if (n == 0) return;
 
     // Min/max via single O(n) pass
-    const auto [minIt, maxIt] = std::minmax_element(lagOut.begin(), lagOut.end());
-    statsOut.min = *minIt;
-    statsOut.max = *maxIt;
+    const auto minMaxPair = std::minmax_element(lagOut.begin(), lagOut.end());
+    statsOut.min = *minMaxPair.first;
+    statsOut.max = *minMaxPair.second;
 
     // Median via std::nth_element (O(n) average) instead of full sort
     QVector<double> sorted = lagOut;
