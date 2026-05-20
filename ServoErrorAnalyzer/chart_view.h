@@ -1,6 +1,7 @@
 #pragma once
 #include <QWidget>
 #include <QMap>
+#include <QPixmap>
 #include <QStringList>
 #include "data_loader.h"
 
@@ -40,6 +41,8 @@ private:
     void drawCurves(QPainter &p);
     void drawCursor(QPainter &p);
     void drawRubberBand(QPainter &p);
+    void drawStaticContent(QPainter &p);
+    void invalidateStaticCache();
 
     static void calcTicks(double vMin, double vMax, int maxTicks,
                           double &first, double &step, int &count);
@@ -72,6 +75,7 @@ private:
     // Cursor state
     QPoint m_mousePos;
     int    m_cursorIdx;
+    int    m_lastEmittedCursorIdx;
     bool   m_cursorVisible;
 
     // Rubber-band zoom
@@ -82,4 +86,9 @@ private:
     // Colors
     QColor m_gridColor;
     QColor m_bgColor;
+
+    // Cached chart without the cursor/rubber band. Large CSV files are costly
+    // to redraw, so mouse moves should reuse this layer.
+    QPixmap m_staticCache;
+    bool    m_staticCacheDirty;
 };

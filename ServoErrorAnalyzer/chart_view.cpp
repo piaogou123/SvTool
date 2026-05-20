@@ -71,10 +71,12 @@ QColor ChartView::axisColor(int idx)
 ChartView::ChartView(QWidget *parent)
     : QWidget(parent)
     , m_cursorIdx(-1)
+    , m_lastEmittedCursorIdx(-1)
     , m_cursorVisible(false)
     , m_rubberBand(false)
     , m_gridColor(220, 220, 220)
     , m_bgColor(252, 252, 252)
+    , m_staticCacheDirty(true)
 {
     setMouseTracking(true);
     setAcceptDrops(true);
@@ -87,6 +89,7 @@ void ChartView::resizeEvent(QResizeEvent *event)
     double w = width();
     double h = height();
     m_plotArea = QRectF(ML, MT, w - ML - MR, h - MT - MB);
+    invalidateStaticCache();
 }
 
 // --- coordinate transforms --------------------------------------------
@@ -135,6 +138,7 @@ void ChartView::setAxisData(const Dataset &data)
 {
     m_data = data;
     m_cursorIdx = -1;
+    m_lastEmittedCursorIdx = -1;
     m_cursorVisible = false;
 
     m_axisNames = data.axisOrder;
@@ -181,8 +185,10 @@ void ChartView::setAxisData(const Dataset &data)
 
 void ChartView::setSeriesVisible(const QString &axis, bool visible)
 {
-    if (m_visible.contains(axis))
+    if (m_visible.contains(axis)) {
         m_visible[axis] = visible;
+        invalidateStaticCache();
+    }
     update();
 }
 
@@ -197,6 +203,7 @@ void ChartView::zoomReset()
     m_viewXMax = m_fullXMax;
     m_viewYMin = m_fullYMin;
     m_viewYMax = m_fullYMax;
+    invalidateStaticCache();
     update();
 }
 
@@ -209,13 +216,34 @@ void ChartView::paintEvent(QPaintEvent *)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
 
+    const QSize pixmapSize = size() * devicePixelRatioF();
+    if (m_staticCacheDirty || m_staticCache.size() != pixmapSize) {
+        m_staticCache = QPixmap(pixmapSize);
+        m_staticCache.setDevicePixelRatio(devicePixelRatioF());
+
+        QPainter cachePainter(&m_staticCache);
+        cachePainter.setRenderHint(QPainter::Antialiasing, true);
+        drawStaticContent(cachePainter);
+        m_staticCacheDirty = false;
+    }
+
+    p.drawPixmap(0, 0, m_staticCache);
+    drawCursor(p);
+    drawRubberBand(p);
+}
+
+void ChartView::drawStaticContent(QPainter &p)
+{
     p.fillRect(rect(), m_bgColor);
     p.fillRect(m_plotArea, Qt::white);
 
     drawGrid(p);
     drawCurves(p);
-    drawCursor(p);
-    drawRubberBand(p);
+}
+
+void ChartView::invalidateStaticCache()
+{
+    m_staticCacheDirty = true;
 }
 
 void ChartView::drawGrid(QPainter &p)
@@ -419,8 +447,11 @@ void ChartView::mouseMoveEvent(QMouseEvent *event)
 
     bool onPlot = m_plotArea.contains(event->pos());
     if (!onPlot) {
-        m_cursorVisible = false;
-        update();
+        if (m_cursorVisible) {
+            m_cursorVisible = false;
+            m_cursorIdx = -1;
+            update();
+        }
         return;
     }
 
@@ -428,11 +459,14 @@ void ChartView::mouseMoveEvent(QMouseEvent *event)
     double t = widgetToTime(event->pos().x());
     m_cursorIdx = nearestIndex(t);
 
-    QMap<QString, double> errors;
-    for (const QString &name : m_axisNames)
-        errors[name] = m_data.axes[name].err[m_cursorIdx];
+    if (m_cursorIdx != m_lastEmittedCursorIdx) {
+        QMap<QString, double> errors;
+        for (const QString &name : m_axisNames)
+            errors[name] = m_data.axes[name].err[m_cursorIdx];
 
-    emit cursorMoved(m_data.time[m_cursorIdx], m_cursorIdx, errors);
+        emit cursorMoved(m_data.time[m_cursorIdx], m_cursorIdx, errors);
+        m_lastEmittedCursorIdx = m_cursorIdx;
+    }
 
     update();
 }
@@ -471,6 +505,7 @@ void ChartView::mouseReleaseEvent(QMouseEvent *event)
             m_viewXMax = std::max(x1, x2);
             m_viewYMin = std::min(y1, y2);
             m_viewYMax = std::max(y1, y2);
+            invalidateStaticCache();
         }
 
         update();
@@ -499,6 +534,7 @@ void ChartView::wheelEvent(QWheelEvent *event)
     if (m_viewYMin < m_fullYMin - yMargin) m_viewYMin = m_fullYMin - yMargin;
     if (m_viewYMax > m_fullYMax + yMargin) m_viewYMax = m_fullYMax + yMargin;
 
+    invalidateStaticCache();
     update();
 }
 
