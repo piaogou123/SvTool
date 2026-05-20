@@ -21,28 +21,6 @@
 #include <QMimeData>
 
 
-// 12-color palette matching chart_view.cpp
-static const QColor kPalette[] = {
-    QColor(220, 30, 30),
-    QColor(0, 150, 0),
-    QColor(0, 100, 255),
-    QColor(240, 140, 0),
-    QColor(140, 20, 200),
-    QColor(0, 160, 160),
-    QColor(200, 50, 120),
-    QColor(120, 100, 40),
-    QColor(60, 120, 220),
-    QColor(200, 80, 60),
-    QColor(0, 130, 100),
-    QColor(160, 100, 180),
-};
-static constexpr int kPaletteSize = sizeof(kPalette) / sizeof(kPalette[0]);
-
-static QColor axisColorForIndex(int idx)
-{
-    return kPalette[idx % kPaletteSize];
-}
-
 static QLabel *makeAxisResponseLabel(int colorIdx)
 {
     QLabel *lbl = new QLabel("—");
@@ -50,7 +28,7 @@ static QLabel *makeAxisResponseLabel(int colorIdx)
     lbl->setStyleSheet(QString(
         "QLabel { background: %1; border-radius: 6px; padding: 10px; "
         "color: #fff; font-size: 12px; }"
-    ).arg(axisColorForIndex(colorIdx).name()));
+    ).arg(ChartView::axisColor(colorIdx).name()));
     lbl->setMinimumHeight(110);
     lbl->setWordWrap(true);
     return lbl;
@@ -208,7 +186,7 @@ void MainWindow::rebuildAxisWidgets(const QStringList &axisNames)
     // Create new widgets per axis
     for (int i = 0; i < axisNames.size(); ++i) {
         const QString &name = axisNames[i];
-        QColor c = axisColorForIndex(i);
+        QColor c = ChartView::axisColor(i);
 
         // Toolbar checkbox
         QCheckBox *cb = new QCheckBox(name, m_chkContainer);
@@ -252,7 +230,7 @@ void MainWindow::onCursorMoved(double time, int idx,
         double err = it.value();
         QString unit = (name == "C") ? "deg" : "mm";
         QColor c = m_chartView->isSeriesVisible(name)
-                       ? axisColorForIndex(m_curData.axisOrder.indexOf(name))
+                       ? ChartView::axisColor(m_curData.axisOrder.indexOf(name))
                        : QColor(128, 128, 128);
         text += QString("<tr><td><b style='color:%1'>%2 Error:</b></td><td>%3 %4</td></tr>")
                     .arg(c.name()).arg(name).arg(err, 0, 'f', 6).arg(unit);

@@ -14,6 +14,7 @@ public:
     bool isSeriesVisible(const QString &axis) const;
     QStringList axisNames() const { return m_axisNames; }
     void zoomReset();
+    static QColor axisColor(int idx);
 
 signals:
     void cursorMoved(double time, int idx, const QMap<QString, double> &errors);
@@ -42,7 +43,6 @@ private:
 
     static void calcTicks(double vMin, double vMax, int maxTicks,
                           double &first, double &step, int &count);
-    static QColor axisColor(int idx);
 
     // Data
     Dataset   m_data;

@@ -15,16 +15,11 @@ bool DataLoader::loadCsv(const QString &filePath, Dataset &out, QString *error)
 
     QTextStream stream(&file);
     QString headerLine = stream.readLine();
-    QString unitsLine  = stream.readLine();
 
     if (headerLine.isEmpty()) {
         if (error) *error = "File is empty or missing header.";
         return false;
     }
-
-    // Detect if second row is a units row
-    bool hasUnitsRow = unitsLine.startsWith("units,") || unitsLine.startsWith("units\t");
-    int dataStartLine = hasUnitsRow ? 2 : 1;
 
     // --- Parse header to build column map -------------------------------
     // Pattern: axes.mach.<l|f>.p[<axisName>]
@@ -96,20 +91,18 @@ bool DataLoader::loadCsv(const QString &filePath, Dataset &out, QString *error)
     }
 
     // --- Read data rows -------------------------------------------------
-    int lineNum = dataStartLine;
     while (!stream.atEnd()) {
         QString line = stream.readLine().trimmed();
         if (line.isEmpty()) continue;
 
         QStringList fields = line.split(',');
         if (fields.size() <= timeCol || fields.size() <= colMap.lastKey()) {
-            ++lineNum;
             continue;
         }
 
         bool ok = true;
         double t = fields.at(timeCol).trimmed().toDouble(&ok);
-        if (!ok) { ++lineNum; continue; }
+        if (!ok) { continue; }
 
         out.time.append(t);
 
@@ -133,11 +126,9 @@ bool DataLoader::loadCsv(const QString &filePath, Dataset &out, QString *error)
                 if (ch.cmd.size() > out.time.size()) ch.cmd.removeLast();
                 if (ch.fb.size() > out.time.size()) ch.fb.removeLast();
             }
-            ++lineNum;
             continue;
         }
 
-        ++lineNum;
     }
 
     if (out.isEmpty()) {
