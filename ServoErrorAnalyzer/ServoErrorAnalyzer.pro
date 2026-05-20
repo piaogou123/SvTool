@@ -1,6 +1,6 @@
 QT       += core gui widgets
 TEMPLATE  = app
-CONFIG   += c++17
+CONFIG   += c++11
 
 TARGET    = ServoErrorAnalyzer
 

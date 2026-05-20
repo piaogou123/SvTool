@@ -216,10 +216,10 @@ void ChartView::paintEvent(QPaintEvent *)
     QPainter p(this);
     p.setRenderHint(QPainter::Antialiasing, true);
 
-    const QSize pixmapSize = size() * devicePixelRatioF();
+    const QSize pixmapSize = size() * devicePixelRatio();
     if (m_staticCacheDirty || m_staticCache.size() != pixmapSize) {
         m_staticCache = QPixmap(pixmapSize);
-        m_staticCache.setDevicePixelRatio(devicePixelRatioF());
+        m_staticCache.setDevicePixelRatio(devicePixelRatio());
 
         QPainter cachePainter(&m_staticCache);
         cachePainter.setRenderHint(QPainter::Antialiasing, true);
