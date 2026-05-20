@@ -302,6 +302,16 @@ void ChartView::drawCurves(QPainter &p)
 
     const QVector<double> &t = m_data.time;
 
+    // Find visible index range (avoid iterating all points on every paint)
+    int iBeg = static_cast<int>(
+        std::lower_bound(t.begin(), t.end(), m_viewXMin) - t.begin());
+    if (iBeg > 0) iBeg--;
+    int iEnd = static_cast<int>(
+        std::upper_bound(t.begin() + iBeg, t.end(), m_viewXMax) - t.begin()) + 1;
+    if (iEnd > m_data.size()) iEnd = m_data.size();
+    int visCount = iEnd - iBeg;
+    if (visCount <= 0) { p.restore(); return; }
+
     for (const QString &name : m_axisNames) {
         if (!m_visible.value(name, true)) continue;
         const AxisChannel &ch = m_data.axes[name];
@@ -310,14 +320,10 @@ void ChartView::drawCurves(QPainter &p)
         p.setPen(pen);
 
         QPolygonF poly;
-        poly.reserve(m_data.size());
+        poly.reserve(visCount);
 
-        for (int i = 0; i < m_data.size(); ++i) {
-            double time = t[i];
-            if (time < m_viewXMin) continue;
-            if (time > m_viewXMax) break;
-            poly.append(dataToWidget(time, ch.err[i]));
-        }
+        for (int i = iBeg; i < iEnd; ++i)
+            poly.append(dataToWidget(t[i], ch.err[i]));
 
         if (poly.size() >= 2)
             p.drawPolyline(poly);
