@@ -215,6 +215,22 @@ static bool commandIsStaticAt(const QVector<double> &cmd, int i, double eps)
     return sameAsPrev && sameAsNext;
 }
 
+// Local direction at each point: sign of change over a short backward
+// window.  Uses simple slope (not cumulative hysteresis) so direction is
+// responsive at reversal boundaries and won't report a stale state.
+static QVector<int> localDirection(const QVector<double>& signal,
+                                   double eps, int window)
+{
+    int n = signal.size();
+    QVector<int> dir(n, 0);
+    for (int i = window; i < n; ++i) {
+        double diff = signal[i] - signal[i - window];
+        if (diff > eps) dir[i] = 1;
+        else if (diff < -eps) dir[i] = -1;
+    }
+    return dir;
+}
+
 static void computeOneAxis(const QVector<double> &time,
                            const QVector<double> &cmd,
                            const QVector<double> &fb,
@@ -237,10 +253,11 @@ static void computeOneAxis(const QVector<double> &time,
     double eps = std::max(cmdRange * 0.0001, 0.005);
     double staticEps = std::max(cmdRange * 1e-9, 1e-9);
 
-    // Pre-compute turning points as hard segment boundaries.
-    // Each point's search is confined to [i+1, nextTurningPoint].
-    QVector<int> turns = findTurningPoints(cmd, eps);
-    int tpCursor = 0;  // index into turns
+    // Per-point direction so forward search only considers fb samples
+    // that are already moving in the same direction as cmd.
+    // Window of 2 samples keeps the check responsive at reversals.
+    QVector<int> cmdDir = localDirection(cmd, eps, 2);
+    QVector<int> fbDir = localDirection(fb, eps, 2);
 
     for (int i = 0; i < n; ++i) {
         if (commandIsStaticAt(cmd, i, staticEps)) {
@@ -252,15 +269,49 @@ static void computeOneAxis(const QVector<double> &time,
         double target = cmd[i];
         double bestDiff = std::abs(fb[i] - target);
         int bestJ = i;
+        int jEnd = std::min(i + maxAhead, n);
+        bool foundAny = false;
 
-        // Advance cursor so turns[tpCursor] is the first turn strictly after i
-        while (tpCursor < turns.size() && turns[tpCursor] <= i)
-            ++tpCursor;
-
-        int segEnd = (tpCursor < turns.size()) ? turns[tpCursor] : n;
-        int jEnd = std::min({i + maxAhead, segEnd, n});
+        int dir = cmdDir[i];
+        bool tracking = false;
+        double fbExt = 0;
 
         for (int j = i + 1; j < jEnd; ++j) {
+            // When cmd is rising but fb is still falling (or vice versa),
+            // fb has not yet responded to the command — matching on value
+            // alone would pick a spurious crossing point.
+            if (dir != 0 && fbDir[j] != 0 && fbDir[j] != dir) {
+                // fb direction has reversed relative to the original cmd
+                // direction.  If we already found valid candidates (fb was
+                // moving in the correct direction), this reversal marks the
+                // end of the useful search window.
+                if (foundAny)
+                    break;
+                continue;
+            }
+
+            foundAny = true;
+
+            // Cumulative retreat from running extremum catches slow fb
+            // reversals that the per-sample direction filter above misses
+            // because per-step changes stay below eps over a 2-sample window.
+            if (dir != 0) {
+                if (!tracking) {
+                    tracking = true;
+                    fbExt = fb[j];
+                } else if (dir == 1) {
+                    if (fb[j] > fbExt)
+                        fbExt = fb[j];
+                    else if (fbExt - fb[j] > eps)
+                        break;
+                } else {  // dir == -1
+                    if (fb[j] < fbExt)
+                        fbExt = fb[j];
+                    else if (fb[j] - fbExt > eps)
+                        break;
+                }
+            }
+
             double diff = std::abs(fb[j] - target);
             if (diff < bestDiff) {
                 bestDiff = diff;
