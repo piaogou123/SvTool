@@ -207,6 +207,14 @@ static QVector<int> findTurningPoints(const QVector<double> &cmd, double eps)
     return turns;
 }
 
+static bool commandIsStaticAt(const QVector<double> &cmd, int i, double eps)
+{
+    const int n = cmd.size();
+    const bool sameAsPrev = (i == 0) || (std::abs(cmd[i] - cmd[i - 1]) <= eps);
+    const bool sameAsNext = (i == n - 1) || (std::abs(cmd[i + 1] - cmd[i]) <= eps);
+    return sameAsPrev && sameAsNext;
+}
+
 static void computeOneAxis(const QVector<double> &time,
                            const QVector<double> &cmd,
                            const QVector<double> &fb,
@@ -227,6 +235,7 @@ static void computeOneAxis(const QVector<double> &time,
     }
     double cmdRange = cmdMax - cmdMin;
     double eps = std::max(cmdRange * 0.0001, 0.005);
+    double staticEps = std::max(cmdRange * 1e-9, 1e-9);
 
     // Pre-compute turning points as hard segment boundaries.
     // Each point's search is confined to [i+1, nextTurningPoint].
@@ -234,6 +243,12 @@ static void computeOneAxis(const QVector<double> &time,
     int tpCursor = 0;  // index into turns
 
     for (int i = 0; i < n; ++i) {
+        if (commandIsStaticAt(cmd, i, staticEps)) {
+            lagOut[i] = 0.0;
+            idxOut[i] = i;
+            continue;
+        }
+
         double target = cmd[i];
         double bestDiff = std::abs(fb[i] - target);
         int bestJ = i;
