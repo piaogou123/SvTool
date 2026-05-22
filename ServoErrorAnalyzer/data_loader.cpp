@@ -4,6 +4,7 @@
 #include <QStringList>
 #include <QRegularExpression>
 #include <algorithm>
+#include <limits>
 
 bool DataLoader::loadCsv(const QString &filePath, Dataset &out, QString *error)
 {
@@ -258,17 +259,20 @@ static void computeOneAxis(const QVector<double> &time,
     // Window of 2 samples keeps the check responsive at reversals.
     QVector<int> cmdDir = localDirection(cmd, eps, 2);
     QVector<int> fbDir = localDirection(fb, eps, 2);
+    // Wider window (8 samples) supplements fbDir when per-step changes are
+    // too small for the 2-sample window to detect — the wide window
+    // accumulates enough displacement to recognise slow drifts.
+    QVector<int> fbDirWide = localDirection(fb, eps, 8);
 
     for (int i = 0; i < n; ++i) {
-        if (commandIsStaticAt(cmd, i, staticEps)) {
+        if (commandIsStaticAt(cmd, i, staticEps)
+            && commandIsStaticAt(fb, i, staticEps)) {
             lagOut[i] = 0.0;
             idxOut[i] = i;
             continue;
         }
 
         double target = cmd[i];
-        double bestDiff = std::abs(fb[i] - target);
-        int bestJ = i;
         int jEnd = std::min(i + maxAhead, n);
         bool foundAny = false;
 
@@ -277,14 +281,64 @@ static void computeOneAxis(const QVector<double> &time,
         // fall back to fb's direction so the search is still constrained.
         if (dir == 0)
             dir = fbDir[i];
+        // When both per-sample directions are 0 (slow movement below the
+        // 2-sample eps threshold), try progressively wider windows to
+        // determine an overall trend.  Prefer cmd — it encodes the
+        // intended direction of motion.
+        if (dir == 0) {
+            for (int w : {4, 8, 16, 32}) {
+                if (i >= w) {
+                    double d = cmd[i] - cmd[i - w];
+                    if (d > eps) { dir = 1; break; }
+                    if (d < -eps) { dir = -1; break; }
+                }
+            }
+        }
+        if (dir == 0) {
+            for (int w : {4, 8, 16, 32}) {
+                if (i >= w) {
+                    double d = fb[i] - fb[i - w];
+                    if (d > eps) { dir = 1; break; }
+                    if (d < -eps) { dir = -1; break; }
+                }
+            }
+        }
+
+        // When fb at position i is moving opposite to cmd, the numerical
+        // proximity is coincidental rather than a true response.  Reject
+        // j=i as a candidate so the forward search finds the actual
+        // response after fb reverses direction.
+        int fbDirAtI = fbDir[i];
+        if (fbDirAtI == 0)
+            fbDirAtI = fbDirWide[i];
+        bool fbAtIOpposite =
+            (dir != 0 && fbDirAtI != 0 && fbDirAtI != dir);
+
+        double bestDiff;
+        int bestJ;
+        if (fbAtIOpposite) {
+            bestDiff = std::numeric_limits<double>::max();
+            bestJ = i;  // fallback if forward search finds nothing
+        } else {
+            bestDiff = std::abs(fb[i] - target);
+            bestJ = i;
+        }
+
         bool tracking = false;
         double fbExt = 0;
 
         for (int j = i + 1; j < jEnd; ++j) {
+            // Resolve fb's effective direction: prefer the responsive
+            // 2-sample window, but fall back to the 8-sample window when
+            // the narrow window reports 0 (per-step change below eps).
+            int fbEffDir = fbDir[j];
+            if (fbEffDir == 0)
+                fbEffDir = fbDirWide[j];
+
             // When cmd is rising but fb is still falling (or vice versa),
             // fb has not yet responded to the command — matching on value
             // alone would pick a spurious crossing point.
-            if (dir != 0 && fbDir[j] != 0 && fbDir[j] != dir) {
+            if (dir != 0 && fbEffDir != 0 && fbEffDir != dir) {
                 // fb direction has reversed relative to the original cmd
                 // direction.  If we already found valid candidates (fb was
                 // moving in the correct direction), this reversal marks the
