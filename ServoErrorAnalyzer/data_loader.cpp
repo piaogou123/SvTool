@@ -273,6 +273,10 @@ static void computeOneAxis(const QVector<double> &time,
         bool foundAny = false;
 
         int dir = cmdDir[i];
+        // When cmd is moving too slowly for per-sample direction detection,
+        // fall back to fb's direction so the search is still constrained.
+        if (dir == 0)
+            dir = fbDir[i];
         bool tracking = false;
         double fbExt = 0;
 
