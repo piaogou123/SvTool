@@ -265,8 +265,7 @@ static void computeOneAxis(const QVector<double> &time,
     QVector<int> fbDirWide = localDirection(fb, eps, 8);
 
     for (int i = 0; i < n; ++i) {
-        if (commandIsStaticAt(cmd, i, staticEps)
-            && commandIsStaticAt(fb, i, staticEps)) {
+        if (commandIsStaticAt(cmd, i, staticEps)) {
             lagOut[i] = 0.0;
             idxOut[i] = i;
             continue;
