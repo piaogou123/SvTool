@@ -421,7 +421,12 @@ static DirectionStats computeOneDirection(const QString &name,
     if (n == 0) return s;
 
     const auto cmdMinMax = std::minmax_element(cmdProj.begin(), cmdProj.end());
-    s.size = *cmdMinMax.second - *cmdMinMax.first;
+    s.cmdSize = *cmdMinMax.second - *cmdMinMax.first;
+
+    const auto fbMinMax = std::minmax_element(fbProj.begin(), fbProj.end());
+    s.fbSize = *fbMinMax.second - *fbMinMax.first;
+
+    s.sizeErr = s.fbSize - s.cmdSize;
 
     QVector<double> err(n);
     for (int i = 0; i < n; ++i)
