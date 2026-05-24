@@ -12,6 +12,7 @@ add_executable(ServoErrorAnalyzer
     main_window.h main_window.cpp
     data_loader.h data_loader.cpp
     chart_view.h chart_view.cpp
+    direction_dialog.h direction_dialog.cpp
 )
 
 target_link_libraries(ServoErrorAnalyzer PRIVATE Qt5::Widgets)

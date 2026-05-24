@@ -409,6 +409,85 @@ static void computeOneAxis(const QVector<double> &time,
     statsOut.stdDev = std::sqrt(sqSum / n);
 }
 
+// --- Direction-statistics computation ------------------------------------
+
+static DirectionStats computeOneDirection(const QString &name,
+                                          const QVector<double> &cmdProj,
+                                          const QVector<double> &fbProj)
+{
+    DirectionStats s;
+    s.name = name;
+    int n = cmdProj.size();
+    if (n == 0) return s;
+
+    const auto cmdMinMax = std::minmax_element(cmdProj.begin(), cmdProj.end());
+    s.size = *cmdMinMax.second - *cmdMinMax.first;
+
+    QVector<double> err(n);
+    for (int i = 0; i < n; ++i)
+        err[i] = cmdProj[i] - fbProj[i];
+
+    const auto errMinMax = std::minmax_element(err.begin(), err.end());
+    s.errMin = *errMinMax.first;
+    s.errMax = *errMinMax.second;
+
+    double sum = 0;
+    for (double v : err) sum += v;
+    s.errAvg = sum / n;
+
+    double sqSum = 0;
+    for (double v : err) sqSum += (v - s.errAvg) * (v - s.errAvg);
+    s.errStdDev = std::sqrt(sqSum / n);
+
+    s.valid = true;
+    return s;
+}
+
+QVector<DirectionStats> DataLoader::computeDirectionStats(const Dataset &data)
+{
+    QVector<DirectionStats> result;
+    if (data.isEmpty()) return result;
+
+    const bool hasX = data.axes.contains("X");
+    const bool hasY = data.axes.contains("Y");
+
+    if (hasX) {
+        const AxisChannel &ch = data.axes["X"];
+        result.append(computeOneDirection(
+            QString::fromUtf8("X (0\xc2\xb0\xe2\x86\x94""180\xc2\xb0)"),
+            ch.cmd, ch.fb));
+    }
+    if (hasY) {
+        const AxisChannel &ch = data.axes["Y"];
+        result.append(computeOneDirection(
+            QString::fromUtf8("Y (90\xc2\xb0\xe2\x86\x94\xe2\x88\x92" "90\xc2\xb0)"),
+            ch.cmd, ch.fb));
+    }
+    if (hasX && hasY) {
+        const AxisChannel &chX = data.axes["X"];
+        const AxisChannel &chY = data.axes["Y"];
+        const int n = data.size();
+        const double inv_sqrt2 = 1.0 / std::sqrt(2.0);
+
+        QVector<double> cmdD1(n), fbD1(n), cmdD2(n), fbD2(n);
+        for (int i = 0; i < n; ++i) {
+            cmdD1[i] = (chX.cmd[i] + chY.cmd[i]) * inv_sqrt2;
+            fbD1[i]  = (chX.fb[i]  + chY.fb[i])  * inv_sqrt2;
+            cmdD2[i] = (-chX.cmd[i] + chY.cmd[i]) * inv_sqrt2;
+            fbD2[i]  = (-chX.fb[i]  + chY.fb[i])  * inv_sqrt2;
+        }
+        result.append(computeOneDirection(
+            QString::fromUtf8(
+                "\xe5\xaf\xb9\xe8\xa7\x92\xe7\xba\xbf""1 (45\xc2\xb0\xe2\x86\x94\xe2\x88\x92""135\xc2\xb0)"),
+            cmdD1, fbD1));
+        result.append(computeOneDirection(
+            QString::fromUtf8(
+                "\xe5\xaf\xb9\xe8\xa7\x92\xe7\xba\xbf""2 (135\xc2\xb0\xe2\x86\x94\xe2\x88\x92" "45\xc2\xb0)"),
+            cmdD2, fbD2));
+    }
+    return result;
+}
+
 void DataLoader::computeResponseTime(Dataset &data, int maxLookaheadSamples)
 {
     if (data.isEmpty()) return;

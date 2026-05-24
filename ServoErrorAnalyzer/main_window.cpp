@@ -1,6 +1,7 @@
 #include "main_window.h"
 #include "chart_view.h"
 #include "data_loader.h"
+#include "direction_dialog.h"
 
 #include <QMenuBar>
 #include <QToolBar>
@@ -38,6 +39,8 @@ static QLabel *makeAxisResponseLabel(int colorIdx)
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
+    , m_dirDialog(nullptr)
+    , m_dirAct(nullptr)
 {
     setupUi();
 }
@@ -89,6 +92,14 @@ void MainWindow::setupToolBar()
 
     QAction *openAct = m_toolBar->addAction("Open");
     connect(openAct, &QAction::triggered, this, &MainWindow::onOpenFile);
+
+    m_toolBar->addSeparator();
+
+    m_dirAct = m_toolBar->addAction(
+        QString::fromUtf8("\xe6\x96\xb9\xe5\x90\x91\xe5\x88\x86\xe6\x9e\x90"));  // 方向分析
+    m_dirAct->setEnabled(false);
+    connect(m_dirAct, &QAction::triggered,
+            this, &MainWindow::onShowDirectionAnalysis);
 
     m_toolBar->addSeparator();
 
@@ -273,6 +284,10 @@ void MainWindow::loadFile(const QString &filePath)
 
     m_chartView->setAxisData(data);
 
+    m_dirAct->setEnabled(true);
+    if (m_dirDialog && m_dirDialog->isVisible())
+        m_dirDialog->updateData(m_curData);
+
     m_lblRespTitle->setText(
         "<b>Response Time</b>  <span style='color:#888;font-size:11px;'>(cursor point detail)</span>");
 
@@ -322,6 +337,19 @@ void MainWindow::updateResponseAt(int idx)
         QLabel *lbl = m_lblResp.value(name);
         if (lbl) lbl->setText(html);
     }
+}
+
+// --- Direction analysis ------------------------------------------------
+
+void MainWindow::onShowDirectionAnalysis()
+{
+    if (!m_dirDialog) {
+        m_dirDialog = new DirectionDialog(this);
+        m_dirDialog->updateData(m_curData);
+    }
+    m_dirDialog->show();
+    m_dirDialog->raise();
+    m_dirDialog->activateWindow();
 }
 
 // --- Drag-and-drop on the main window itself ---------------------------

@@ -14,6 +14,16 @@ struct ResponseStats {
     double stdDev = 0;
 };
 
+struct DirectionStats {
+    QString name;          // e.g. "X (0°↔180°)"
+    double  size     = 0;  // stroke: max(cmd_proj) - min(cmd_proj)
+    double  errMax   = 0;  // max signed error (cmd - fb)
+    double  errMin   = 0;  // min signed error
+    double  errAvg   = 0;  // mean signed error
+    double  errStdDev = 0; // std dev of error
+    bool    valid    = false;
+};
+
 struct AxisChannel {
     QVector<double> cmd, fb, err;
     QVector<double> respLag;
@@ -34,4 +44,5 @@ class DataLoader {
 public:
     static bool loadCsv(const QString &filePath, Dataset &out, QString *error = nullptr);
     static void computeResponseTime(Dataset &data, int maxLookaheadSamples = 500);
+    static QVector<DirectionStats> computeDirectionStats(const Dataset &data);
 };
