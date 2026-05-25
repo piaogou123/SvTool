@@ -5,7 +5,6 @@
 class CircularityWidget;
 class QTableWidget;
 class QLabel;
-class QSplitter;
 
 class DirectionDialog : public QDialog {
     Q_OBJECT
@@ -16,8 +15,14 @@ public:
 private:
     void setupUi();
     void buildTable(const QVector<DirectionStats> &stats);
+    void updateMetricCards();
 
-    CircularityWidget *m_chart;
-    QTableWidget      *m_table;
-    QLabel            *m_lblNoData;
+    // Metric card labels (top header)
+    QLabel *m_cardRoundness = nullptr;
+    QLabel *m_cardAvgRadius = nullptr;
+    QLabel *m_cardRadiusRange = nullptr;
+
+    CircularityWidget *m_chart = nullptr;
+    QTableWidget      *m_table = nullptr;
+    QLabel            *m_lblNoData = nullptr;
 };

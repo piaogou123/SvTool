@@ -355,17 +355,7 @@ void CircularityWidget::drawOverlay(QPainter &p)
 {
     QRect plot = plotRect();
 
-    // 真圆度 label — top-left corner of plot
-    p.setFont(QFont("Arial", 10, QFont::Bold));
-    p.setPen(QColor(50, 50, 50));
-    QString roundStr =
-        // 真圆度:
-        QString::fromUtf8("\xe7\x9c\x9f\xe5\x9c\x86\xe5\xba\xa6: ")
-        + QString::number(m_roundness, 'f', 4) + " mm";
-    p.drawText(plot.adjusted(6, 4, 0, 0),
-               Qt::AlignTop | Qt::AlignLeft, roundStr);
-
-    // Zoom factor — top-right
+    // Zoom factor — top-right (roundness shown as metric card outside chart)
     p.setFont(QFont("Arial", 10));
     p.setPen(QColor(100, 100, 100));
     QString zoomStr = QString::fromUtf8("\xc3\x97")  // ×

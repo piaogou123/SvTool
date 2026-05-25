@@ -7,13 +7,15 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QFrame>
 #include <QFont>
 
+// Row colors aligned with direction-line colors used in the chart.
 static const QColor kRowColors[] = {
-    QColor(255, 220, 220),  // X  — light red
-    QColor(210, 240, 210),  // Y  — light green
-    QColor(255, 240, 205),  // D1 — light orange
-    QColor(230, 215, 250),  // D2 — light purple
+    QColor(255, 230, 230),  // X  — light red
+    QColor(220, 245, 220),  // Y  — light green
+    QColor(255, 240, 210),  // D1 — light orange
+    QColor(235, 220, 250),  // D2 — light purple
 };
 
 enum Col {
@@ -21,12 +23,44 @@ enum Col {
     kColCmdSize = 1,
     kColFbSize  = 2,
     kColSizeErr = 3,
-    kColErrMax  = 4,
-    kColErrMin  = 5,
-    kColErrAvg  = 6,
-    kColErrStd  = 7,
-    kColCount   = 8
+    kColCount   = 4
 };
+
+// -------------------------------------------------------------------------
+// Metric card helpers
+// -------------------------------------------------------------------------
+
+// Build a single metric card with title + value + unit
+// accentColor is used for the left border accent and the title text.
+static QLabel *makeMetricCard(const QColor &accent)
+{
+    QLabel *lbl = new QLabel();
+    lbl->setTextFormat(Qt::RichText);
+    lbl->setAlignment(Qt::AlignCenter);
+    lbl->setMinimumHeight(76);
+    lbl->setStyleSheet(QString(
+        "QLabel { background: white; border: 1px solid #d0d0d0; "
+        "border-left: 4px solid %1; border-radius: 6px; padding: 8px 12px; }"
+    ).arg(accent.name()));
+    return lbl;
+}
+
+static void setCardContent(QLabel *card,
+                            const QString &title,
+                            const QString &value,
+                            const QString &unit,
+                            const QColor &accent,
+                            const QColor &valueColor = QColor(40, 40, 40))
+{
+    QString html = QString(
+        "<div style='text-align:center; line-height:1.2;'>"
+        "<div style='color:%1; font-size:11px; font-weight:bold; letter-spacing:1px;'>%2</div>"
+        "<div style='color:%5; font-size:22px; font-weight:bold; margin-top:2px;'>%3</div>"
+        "<div style='color:#777; font-size:10px; margin-top:1px;'>%4</div>"
+        "</div>"
+    ).arg(accent.name(), title, value, unit, valueColor.name());
+    card->setText(html);
+}
 
 // -------------------------------------------------------------------------
 
@@ -37,32 +71,56 @@ DirectionDialog::DirectionDialog(QWidget *parent)
     // 方向尺寸分析
     setWindowTitle(QString::fromUtf8(
         "\xe6\x96\xb9\xe5\x90\x91\xe5\xb0\xba\xe5\xaf\xb8\xe5\x88\x86\xe6\x9e\x90"));
-    resize(960, 860);
-    setMinimumSize(600, 500);
+    resize(980, 880);
+    setMinimumSize(640, 540);
 }
 
 void DirectionDialog::setupUi()
 {
     QVBoxLayout *root = new QVBoxLayout(this);
-    root->setContentsMargins(8, 8, 8, 8);
-    root->setSpacing(6);
+    root->setContentsMargins(10, 10, 10, 10);
+    root->setSpacing(8);
 
-    // ---- Top: circularity chart — stretch=1, fills all available space ----
+    // ====== Top: metric cards row ========================================
+    QHBoxLayout *cardRow = new QHBoxLayout();
+    cardRow->setSpacing(8);
+
+    m_cardRoundness   = makeMetricCard(QColor(220,  60,  60));   // red
+    m_cardAvgRadius   = makeMetricCard(QColor( 30, 110, 200));   // blue
+    m_cardRadiusRange = makeMetricCard(QColor(120, 120, 130));   // gray
+
+    // Default placeholder content
+    setCardContent(m_cardRoundness,
+        QString::fromUtf8("\xe7\x9c\x9f\xe5\x9c\x86\xe5\xba\xa6"),  // 真圆度
+        "—", "mm", QColor(220, 60, 60));
+    setCardContent(m_cardAvgRadius,
+        QString::fromUtf8("\xe5\xb9\xb3\xe5\x9d\x87\xe5\x8d\x8a\xe5\xbe\x84"),  // 平均半径
+        "—", "mm", QColor(30, 110, 200));
+    setCardContent(m_cardRadiusRange,
+        QString::fromUtf8("\xe5\x8d\x8a\xe5\xbe\x84\xe8\x8c\x83\xe5\x9b\xb4"),  // 半径范围
+        "—", "min ~ max", QColor(120, 120, 130));
+
+    cardRow->addWidget(m_cardRoundness, 1);
+    cardRow->addWidget(m_cardAvgRadius, 1);
+    cardRow->addWidget(m_cardRadiusRange, 1);
+    root->addLayout(cardRow);
+
+    // ====== Middle: circularity chart — takes all remaining space =========
     m_chart = new CircularityWidget(this);
     m_chart->setMinimumSize(400, 400);
-    root->addWidget(m_chart, 1);   // stretch factor 1: takes all remaining height
+    root->addWidget(m_chart, 1);
 
-    // ---- Bottom: "no data" placeholder ----------------------------------
-    // 请先加载 CSV 文件
+    // ====== Bottom: "no data" placeholder ================================
     m_lblNoData = new QLabel(
+        // 请先加载 CSV 文件
         QString::fromUtf8(
             "\xe8\xaf\xb7\xe5\x85\x88\xe5\x8a\xa0\xe8\xbd\xbd CSV \xe6\x96\x87\xe4\xbb\xb6"),
         this);
     m_lblNoData->setAlignment(Qt::AlignCenter);
-    m_lblNoData->setStyleSheet("color: #999; font-size: 13px;");
+    m_lblNoData->setStyleSheet("color: #999; font-size: 13px; padding: 6px;");
     root->addWidget(m_lblNoData, 0);
 
-    // ---- Bottom: stats table — fixed height, no stretch ------------------
+    // ====== Bottom: focused 4-column table ===============================
     m_table = new QTableWidget(this);
     m_table->setColumnCount(kColCount);
 
@@ -70,22 +128,14 @@ void DirectionDialog::setupUi()
     // 方向
     hdrs << QString::fromUtf8("\xe6\x96\xb9\xe5\x90\x91");
     // 指令尺寸 (mm)
-    hdrs << QString::fromUtf8("\xe6\x8c\x87\xe4\xbb\xa4\xe5\xb0\xba\xe5\xaf\xb8 (mm)");
+    hdrs << QString::fromUtf8(
+        "\xe6\x8c\x87\xe4\xbb\xa4\xe5\xb0\xba\xe5\xaf\xb8 (mm)");
     // 反馈尺寸 (mm)
-    hdrs << QString::fromUtf8("\xe5\x8f\x8d\xe9\xa6\x88\xe5\xb0\xba\xe5\xaf\xb8 (mm)");
+    hdrs << QString::fromUtf8(
+        "\xe5\x8f\x8d\xe9\xa6\x88\xe5\xb0\xba\xe5\xaf\xb8 (mm)");
     // 尺寸偏差 (mm)
-    hdrs << QString::fromUtf8("\xe5\xb0\xba\xe5\xaf\xb8\xe5\x81\x8f\xe5\xb7\xae (mm)");
-    // 跟随误差最大 (mm)
     hdrs << QString::fromUtf8(
-        "\xe8\xb7\x9f\xe9\x9a\x8f\xe8\xaf\xaf\xe5\xb7\xae\xe6\x9c\x80\xe5\xa4\xa7 (mm)");
-    // 跟随误差最小 (mm)
-    hdrs << QString::fromUtf8(
-        "\xe8\xb7\x9f\xe9\x9a\x8f\xe8\xaf\xaf\xe5\xb7\xae\xe6\x9c\x80\xe5\xb0\x8f (mm)");
-    // 跟随误差均值 (mm)
-    hdrs << QString::fromUtf8(
-        "\xe8\xb7\x9f\xe9\x9a\x8f\xe8\xaf\xaf\xe5\xb7\xae\xe5\x9d\x87\xe5\x80\xbc (mm)");
-    // 标准差 (mm)
-    hdrs << QString::fromUtf8("\xe6\xa0\x87\xe5\x87\x86\xe5\xb7\xae (mm)");
+        "\xe5\xb0\xba\xe5\xaf\xb8\xe5\x81\x8f\xe5\xb7\xae (mm)");
 
     m_table->setHorizontalHeaderLabels(hdrs);
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
@@ -96,26 +146,28 @@ void DirectionDialog::setupUi()
     m_table->setShowGrid(true);
     m_table->setAlternatingRowColors(false);
     m_table->setStyleSheet(
-        "QTableWidget { font-size: 12px; }"
-        "QHeaderView::section { font-weight: bold; font-size: 11px; padding: 3px; }");
+        "QTableWidget { font-size: 13px; border: 1px solid #d0d0d0; }"
+        "QHeaderView::section { background: #f5f5f7; font-weight: bold; "
+        "font-size: 12px; padding: 6px; border: none; border-right: 1px solid #d0d0d0; }");
     m_table->hide();
 
-    root->addWidget(m_table, 0);   // stretch factor 0: stays compact at bottom
+    root->addWidget(m_table, 0);
 }
 
 // -------------------------------------------------------------------------
-// Data update
+// Cell helpers
 // -------------------------------------------------------------------------
 
 static QTableWidgetItem *makeCell(const QString &text, const QColor &bg,
-                                   bool bold = false)
+                                   bool bold = false, int fontPt = 0)
 {
     QTableWidgetItem *item = new QTableWidgetItem(text);
     item->setTextAlignment(Qt::AlignCenter);
     item->setBackground(bg);
-    if (bold) {
+    if (bold || fontPt > 0) {
         QFont f = item->font();
-        f.setBold(true);
+        if (bold)       f.setBold(true);
+        if (fontPt > 0) f.setPointSize(fontPt);
         item->setFont(f);
     }
     return item;
@@ -129,38 +181,87 @@ static QTableWidgetItem *makeNumCell(double val, const QColor &bg,
 
 static QTableWidgetItem *makeSizeErrCell(double val, const QColor &bg)
 {
-    QTableWidgetItem *item = makeNumCell(val, bg, 4, true);
+    // Prefix sign explicitly so positive/negative is unambiguous
+    QString txt = (val >= 0 ? "+" : "") + QString::number(val, 'f', 4);
+    QTableWidgetItem *item = makeCell(txt, bg, true);
     if (val > 1e-9)
-        item->setForeground(QColor(180, 0, 0));   // red = over
+        item->setForeground(QColor(200, 0, 0));    // red = oversized
     else if (val < -1e-9)
-        item->setForeground(QColor(0, 0, 200));   // blue = under
+        item->setForeground(QColor(0, 80, 200));   // blue = undersized
+    else
+        item->setForeground(QColor(60, 60, 60));
     return item;
 }
 
 void DirectionDialog::buildTable(const QVector<DirectionStats> &stats)
 {
     m_table->setRowCount(stats.size());
+    const int rowH = 38;
     for (int row = 0; row < stats.size(); ++row)
-        m_table->setRowHeight(row, 34);
+        m_table->setRowHeight(row, rowH);
 
     for (int row = 0; row < stats.size(); ++row) {
         const DirectionStats &s = stats[row];
         const QColor bg = kRowColors[row % 4];
 
-        m_table->setItem(row, kColName,    makeCell(s.name, bg, true));
+        m_table->setItem(row, kColName,    makeCell(s.name, bg, true, 11));
         m_table->setItem(row, kColCmdSize, makeNumCell(s.cmdSize,   bg));
         m_table->setItem(row, kColFbSize,  makeNumCell(s.fbSize,    bg));
         m_table->setItem(row, kColSizeErr, makeSizeErrCell(s.sizeErr, bg));
-        m_table->setItem(row, kColErrMax,  makeNumCell(s.errMax,    bg));
-        m_table->setItem(row, kColErrMin,  makeNumCell(s.errMin,    bg));
-        m_table->setItem(row, kColErrAvg,  makeNumCell(s.errAvg,    bg));
-        m_table->setItem(row, kColErrStd,  makeNumCell(s.errStdDev, bg));
     }
 }
+
+// -------------------------------------------------------------------------
+// Metric cards
+// -------------------------------------------------------------------------
+
+void DirectionDialog::updateMetricCards()
+{
+    if (!m_chart || !m_chart->hasData()) {
+        setCardContent(m_cardRoundness,
+            QString::fromUtf8("\xe7\x9c\x9f\xe5\x9c\x86\xe5\xba\xa6"),
+            "—", "mm", QColor(220, 60, 60));
+        setCardContent(m_cardAvgRadius,
+            QString::fromUtf8("\xe5\xb9\xb3\xe5\x9d\x87\xe5\x8d\x8a\xe5\xbe\x84"),
+            "—", "mm", QColor(30, 110, 200));
+        setCardContent(m_cardRadiusRange,
+            QString::fromUtf8("\xe5\x8d\x8a\xe5\xbe\x84\xe8\x8c\x83\xe5\x9b\xb4"),
+            "—", "min ~ max (mm)", QColor(120, 120, 130));
+        return;
+    }
+
+    double rd  = m_chart->roundness();
+    double avg = m_chart->avgRadius();
+    double rmn = m_chart->minRadius();
+    double rmx = m_chart->maxRadius();
+
+    setCardContent(m_cardRoundness,
+        QString::fromUtf8("\xe7\x9c\x9f\xe5\x9c\x86\xe5\xba\xa6"),
+        QString::number(rd, 'f', 4),
+        QString::fromUtf8("mm  (\xe6\x9c\x80\xe5\xa4\xa7\xe2\x88\x92\xe6\x9c\x80\xe5\xb0\x8f\xe5\x8d\x8a\xe5\xbe\x84)"),  // mm (最大−最小半径)
+        QColor(220, 60, 60), QColor(180, 40, 40));
+
+    setCardContent(m_cardAvgRadius,
+        QString::fromUtf8("\xe5\xb9\xb3\xe5\x9d\x87\xe5\x8d\x8a\xe5\xbe\x84"),
+        QString::number(avg, 'f', 4),
+        QString::fromUtf8("mm  (\xe5\x8f\x8d\xe9\xa6\x88\xe8\xbd\xa8\xe8\xbf\xb9)"),  // mm (反馈轨迹)
+        QColor(30, 110, 200), QColor(30, 90, 170));
+
+    setCardContent(m_cardRadiusRange,
+        QString::fromUtf8("\xe5\x8d\x8a\xe5\xbe\x84\xe8\x8c\x83\xe5\x9b\xb4"),
+        QString("%1 ~ %2").arg(rmn, 0, 'f', 4).arg(rmx, 0, 'f', 4),
+        "mm",
+        QColor(120, 120, 130), QColor(60, 60, 70));
+}
+
+// -------------------------------------------------------------------------
+// Public: update everything from a new dataset
+// -------------------------------------------------------------------------
 
 void DirectionDialog::updateData(const Dataset &data)
 {
     m_chart->setData(data);
+    updateMetricCards();
 
     QVector<DirectionStats> stats = DataLoader::computeDirectionStats(data);
     if (stats.isEmpty()) {
@@ -175,6 +276,6 @@ void DirectionDialog::updateData(const Dataset &data)
 
     // Fix table height to exactly fit its rows (no wasted space)
     int tableH = m_table->horizontalHeader()->height()
-                 + stats.size() * 34 + 4;
+                 + stats.size() * 38 + 4;
     m_table->setFixedHeight(tableH);
 }

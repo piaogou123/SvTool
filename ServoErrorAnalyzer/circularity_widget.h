@@ -12,6 +12,13 @@ public:
     explicit CircularityWidget(QWidget *parent = nullptr);
     void setData(const Dataset &data);
 
+    // Metric accessors (computed from feedback trajectory)
+    bool   hasData()    const { return m_hasData; }
+    double roundness()  const { return m_roundness; }
+    double avgRadius()  const { return m_avgRadius; }
+    double minRadius()  const { return m_minRadius; }
+    double maxRadius()  const { return m_maxRadius; }
+
 protected:
     void paintEvent(QPaintEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
