@@ -62,11 +62,22 @@ void CircularityWidget::setData(const Dataset &data)
     const int n = m_fx.size();
     if (n < 2) { update(); return; }
 
-    // Centroid
-    double sumX = 0, sumY = 0;
-    for (int i = 0; i < n; ++i) { sumX += m_fx[i]; sumY += m_fy[i]; }
-    m_cx = sumX / n;
-    m_cy = sumY / n;
+    // Geometric center: midpoint of the feedback bounding box.
+    // This is more stable than the sample-average centroid when sampling
+    // density varies around the circle (e.g. servo speed changes), ensuring
+    // caliper lines always pass through the visual center of the trajectory.
+    double minFx = std::numeric_limits<double>::max();
+    double maxFx = -minFx;
+    double minFy = std::numeric_limits<double>::max();
+    double maxFy = -minFy;
+    for (int i = 0; i < n; ++i) {
+        minFx = std::min(minFx, m_fx[i]);
+        maxFx = std::max(maxFx, m_fx[i]);
+        minFy = std::min(minFy, m_fy[i]);
+        maxFy = std::max(maxFy, m_fy[i]);
+    }
+    m_cx = (minFx + maxFx) / 2.0;
+    m_cy = (minFy + maxFy) / 2.0;
 
     // Radii from centroid
     m_maxRadius = 0;
