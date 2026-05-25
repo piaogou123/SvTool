@@ -345,8 +345,10 @@ void MainWindow::onShowDirectionAnalysis()
 {
     if (!m_dirDialog) {
         m_dirDialog = new DirectionDialog(this);
-        m_dirDialog->updateData(m_curData);
     }
+    // Always refresh data when showing — ensures a newly loaded file
+    // is reflected even if the dialog was hidden when the file was loaded.
+    m_dirDialog->updateData(m_curData);
     m_dirDialog->show();
     m_dirDialog->raise();
     m_dirDialog->activateWindow();
