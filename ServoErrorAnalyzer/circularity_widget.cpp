@@ -162,15 +162,17 @@ void CircularityWidget::paintEvent(QPaintEvent *)
 
     QRect plot = plotRect();
 
+    // All geometry strictly clipped to plot area
     p.setClipRect(plot);
     drawBackground(p);
     drawDirectionLines(p);
     drawReferenceCircles(p);
     drawTrajectory(p);
+    drawSizeBars(p);   // lines clipped; labels drawn separately below
     p.setClipping(false);
 
-    // Size bars and labels drawn outside clip so text isn't cut off
-    drawSizeBars(p);
+    // Text overlays: not clipped so they are never cut off at the edge
+    drawSizeLabels(p);
     drawOverlay(p);
 }
 
@@ -206,24 +208,40 @@ void CircularityWidget::drawDirectionLines(QPainter &p)
     }
 }
 
+// Draw a circle safely: Qt's rasterizer overflows for radii > ~16 k px.
+// For very large radii we build a QPainterPath so Qt clips via the path
+// rather than the ellipse primitive.
+static void drawCircleSafe(QPainter &p, QPointF cw, double r_px)
+{
+    if (r_px <= 0) return;
+    if (r_px > 8000.0) {
+        // Use addEllipse on a path; Qt clips paths more robustly
+        QPainterPath path;
+        path.addEllipse(cw, r_px, r_px);
+        p.drawPath(path);
+    } else {
+        p.drawEllipse(cw, r_px, r_px);
+    }
+}
+
 void CircularityWidget::drawReferenceCircles(QPainter &p)
 {
     if (m_avgRadius <= 0) return;
     double scale = m_fitScale * m_zoom;
     QPointF cw = toWidget(m_cx, m_cy);
+    p.setBrush(Qt::NoBrush);
 
     // Min radius circle (inner bound)
     p.setPen(QPen(QColor(200, 200, 240), 1.2, Qt::DotLine));
-    p.setBrush(Qt::NoBrush);
-    p.drawEllipse(cw, m_minRadius * scale, m_minRadius * scale);
+    drawCircleSafe(p, cw, m_minRadius * scale);
 
     // Max radius circle (outer bound)
     p.setPen(QPen(QColor(240, 200, 200), 1.2, Qt::DotLine));
-    p.drawEllipse(cw, m_maxRadius * scale, m_maxRadius * scale);
+    drawCircleSafe(p, cw, m_maxRadius * scale);
 
     // Average radius (nominal circle)
     p.setPen(QPen(QColor(160, 160, 210), 1.5, Qt::SolidLine));
-    p.drawEllipse(cw, m_avgRadius * scale, m_avgRadius * scale);
+    drawCircleSafe(p, cw, m_avgRadius * scale);
 }
 
 void CircularityWidget::drawTrajectory(QPainter &p)
@@ -248,43 +266,54 @@ void CircularityWidget::drawTrajectory(QPainter &p)
 
 void CircularityWidget::drawSizeBars(QPainter &p)
 {
-    // For each direction, draw a thick tick at the two projection extremes
-    // and annotate with the feedback size.
-    static const QPointF kLabelOffset[] = {
-        QPointF( 6, -4),   // X: right of max
-        QPointF( 4, -14),  // Y: above max
-        QPointF( 6, -6),   // D1: upper-right
-        QPointF(-100, -6), // D2: upper-left (negative x to go left)
-    };
-
+    // Geometry only (called while clip is active).
     for (int d = 0; d < m_dirs.size(); ++d) {
         const DirExtent &de = m_dirs[d];
         double ca = std::cos(de.angle), sa = std::sin(de.angle);
 
-        // Widget coords of the two extent endpoints
         QPointF wMin = toWidget(m_cx + de.projMin * ca,
                                 m_cy + de.projMin * sa);
         QPointF wMax = toWidget(m_cx + de.projMax * ca,
                                 m_cy + de.projMax * sa);
 
-        // Perpendicular tick length (widget pixels)
         const double kTick = 7.0;
         QPointF perp(-sa * kTick, -ca * kTick); // y-flipped perp
 
         p.setPen(QPen(de.color, 2.0));
         p.drawLine(wMin + perp, wMin - perp);
         p.drawLine(wMax + perp, wMax - perp);
-        // Light line connecting them
+
         p.setPen(QPen(de.color, 1.0, Qt::DotLine));
         p.drawLine(wMin, wMax);
+    }
+}
 
-        // Size label near the max endpoint
+void CircularityWidget::drawSizeLabels(QPainter &p)
+{
+    // Labels only (called after clip is removed so text isn't cut off).
+    // Clamp label position to inside the widget so it stays visible
+    // even when the size-bar endpoint is off screen.
+    QRect wr = rect().adjusted(kM, kM, -kM, -kM);
+
+    for (int d = 0; d < m_dirs.size(); ++d) {
+        const DirExtent &de = m_dirs[d];
+        double ca = std::cos(de.angle), sa = std::sin(de.angle);
+
+        // The label is anchored at the *positive* extent of each direction
+        QPointF wMax = toWidget(m_cx + de.projMax * ca,
+                                m_cy + de.projMax * sa);
+
+        // Clamp into the plot area so label is always readable
+        double lx = std::max((double)wr.left(),
+                    std::min((double)wr.right()  - 90, wMax.x() + 6));
+        double ly = std::max((double)wr.top()  + 4,
+                    std::min((double)wr.bottom() - 14, wMax.y() - 4));
+
         double sizeVal = de.projMax - de.projMin;
-        QString txt = QString("%1mm").arg(sizeVal, 0, 'f', 4);
-        p.setFont(QFont("Arial", 9));
+        QString txt = QString("%1 mm").arg(sizeVal, 0, 'f', 4);
+        p.setFont(QFont("Arial", 9, QFont::Bold));
         p.setPen(de.color);
-        QPointF offset = kLabelOffset[d % 4];
-        p.drawText(wMax + offset, txt);
+        p.drawText(QPointF(lx, ly), txt);
     }
 }
 

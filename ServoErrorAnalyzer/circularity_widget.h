@@ -32,7 +32,8 @@ private:
     void drawDirectionLines(QPainter &p);
     void drawReferenceCircles(QPainter &p);
     void drawTrajectory(QPainter &p);
-    void drawSizeBars(QPainter &p);
+    void drawSizeBars(QPainter &p);    // geometry (clipped)
+    void drawSizeLabels(QPainter &p); // text (unclipped)
     void drawOverlay(QPainter &p);
 
     // Feedback data (raw positions)
