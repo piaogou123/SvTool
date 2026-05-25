@@ -134,10 +134,15 @@ void MainWindow::setupCursorDock()
         "\xe5\x9c\xa8\xe5\x9b\xbe\xe8\xa1\xa8\xe4\xb8\x8a\xe7\xa7\xbb\xe5\x8a\xa8"
         "\xe9\xbc\xa0\xe6\xa0\x87\xe4\xbb\xa5\xe6\x9f\xa5\xe7\x9c\x8b\xe8\xaf\xaf"
         "\xe5\xb7\xae\xe5\x80\xbc"));
-    m_lblCursor->setWordWrap(true);
     m_lblCursor->setTextFormat(Qt::RichText);
-    lay->addWidget(m_lblCursor);
-    lay->addStretch();
+    m_lblCursor->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    // stretch=1: label fills the full width so word-wrap never changes row count
+    lay->addWidget(m_lblCursor, 1);
+
+    // Fixed height breaks the layout-feedback loop that causes value jumping:
+    //   setText() → dock resizes → ChartView resizes → plotArea changes →
+    //   same mouse pixel maps to different time → different index → setText() again
+    container->setFixedHeight(92);
 
     dock->setWidget(container);
     addDockWidget(Qt::BottomDockWidgetArea, dock);
