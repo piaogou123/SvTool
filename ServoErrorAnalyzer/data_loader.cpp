@@ -207,7 +207,16 @@ static void computeOneAxis(const QVector<double> &time,
         if (cmd[i] > cmdMax) cmdMax = cmd[i];
     }
     double cmdRange = cmdMax - cmdMin;
+    // Direction-detection threshold: scales with axis range so that the
+    // same relative motion amplitude is recognised regardless of units.
+    // Used in localDirection() and all direction-fallback comparisons.
     double eps = std::max(cmdRange * 0.0001, 0.005);
+    // Tracking-exit threshold: how far fb must retreat from its running
+    // extremum before the forward search is abandoned.  Fixed at 0.005 mm
+    // so that large-range files (where eps would be >> 0.005) still get a
+    // tight exit and cannot scan past a genuine reversal into the arc
+    // return segment (root cause of spurious 100+ ms lag values).
+    const double kTrackEps = 0.005;
     double staticEps = std::max(cmdRange * 1e-9, 1e-9);
 
     // Per-point direction so forward search only considers fb samples
@@ -343,12 +352,12 @@ static void computeOneAxis(const QVector<double> &time,
                 } else if (dir == 1) {
                     if (fb[j] > fbExt)
                         fbExt = fb[j];
-                    else if (fbExt - fb[j] > eps)
+                    else if (fbExt - fb[j] > kTrackEps)
                         break;
                 } else {  // dir == -1
                     if (fb[j] < fbExt)
                         fbExt = fb[j];
-                    else if (fb[j] - fbExt > eps)
+                    else if (fb[j] - fbExt > kTrackEps)
                         break;
                 }
             }
