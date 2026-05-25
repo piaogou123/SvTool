@@ -135,18 +135,26 @@ void CircularityWidget::setData(const Dataset &data)
 
 QRect CircularityWidget::plotRect() const
 {
-    // Square plot area (equal aspect ratio crucial for circular display)
-    int side = std::min(width() - 2*kM, height() - 2*kM);
-    if (side < 10) side = 10;
-    int ox = (width()  - side) / 2;
-    int oy = (height() - side) / 2;
-    return QRect(ox, oy, side, side);
+    // Rectangular plot: full widget width, height = min(w,h) - 2*kM.
+    // Width fills the available space so the chart uses the whole window;
+    // height stays the same as the old square side so the vertical scale
+    // is unchanged after a reset.
+    int pw = width() - 2 * kM;
+    int ph = std::min(width() - 2 * kM, height() - 2 * kM);
+    if (pw < 10) pw = 10;
+    if (ph < 10) ph = 10;
+    int ox = kM;
+    int oy = (height() - ph) / 2;
+    return QRect(ox, oy, pw, ph);
 }
 
 void CircularityWidget::resetView()
 {
     QRect plot = plotRect();
-    m_fitScale = (m_dataRange > 0) ? (plot.width() * 0.5) / m_dataRange : 1.0;
+    // Use the shorter side (height) so the circle fits inside both
+    // dimensions after the plot became wider than tall.
+    int minSide = std::min(plot.width(), plot.height());
+    m_fitScale = (m_dataRange > 0) ? (minSide * 0.5) / m_dataRange : 1.0;
     m_zoom = 1.0;
     m_pan  = QPointF(0, 0);
 }
