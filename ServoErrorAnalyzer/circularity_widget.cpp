@@ -178,7 +178,6 @@ void CircularityWidget::paintEvent(QPaintEvent *)
     // All geometry strictly clipped to plot area
     p.setClipRect(plot);
     drawBackground(p);
-    drawDirectionLines(p);
     drawCommandTrajectory(p);   // command path drawn first (below feedback)
     drawTrajectory(p);           // feedback path on top
     drawSizeBars(p);   // lines clipped; labels drawn separately below
@@ -203,22 +202,6 @@ void CircularityWidget::drawBackground(QPainter &p)
 
     p.setPen(QPen(QColor(180, 180, 180), 1));
     p.drawRect(plot);
-}
-
-void CircularityWidget::drawDirectionLines(QPainter &p)
-{
-    QRect plot = plotRect();
-    QPointF cw = toWidget(m_cx, m_cy);  // centroid in widget space
-    double len = std::hypot(plot.width(), plot.height());
-
-    for (int d = 0; d < m_dirs.size(); ++d) {
-        double ca = std::cos(m_dirs[d].angle);
-        double sa = std::sin(m_dirs[d].angle);
-        QPointF dir(ca * len, -sa * len);  // y-flipped in widget
-        QPen pen(m_dirs[d].color, 1.0, Qt::DashLine);
-        p.setPen(pen);
-        p.drawLine(cw - dir, cw + dir);
-    }
 }
 
 void CircularityWidget::drawCommandTrajectory(QPainter &p)
@@ -263,7 +246,9 @@ void CircularityWidget::drawTrajectory(QPainter &p)
 
 void CircularityWidget::drawSizeBars(QPainter &p)
 {
-    // Geometry only (called while clip is active).
+    // Draw a caliper-style measurement ruler for each direction.
+    // The ruler runs exactly from projMin to projMax along the direction axis,
+    // so it aligns precisely with the trajectory's actual extent.
     for (int d = 0; d < m_dirs.size(); ++d) {
         const DirExtent &de = m_dirs[d];
         double ca = std::cos(de.angle), sa = std::sin(de.angle);
@@ -273,15 +258,30 @@ void CircularityWidget::drawSizeBars(QPainter &p)
         QPointF wMax = toWidget(m_cx + de.projMax * ca,
                                 m_cy + de.projMax * sa);
 
-        const double kTick = 7.0;
-        QPointF perp(-sa * kTick, -ca * kTick); // y-flipped perp
+        // Perpendicular unit vector (widget space, y-flipped)
+        QPointF perp(-sa, -ca);
 
-        p.setPen(QPen(de.color, 2.0));
-        p.drawLine(wMin + perp, wMin - perp);
-        p.drawLine(wMax + perp, wMax - perp);
+        // Outer tick length and inner (center line) half-gap
+        const double kTickOuter = 10.0;
+        const double kTickInner =  4.0;
 
-        p.setPen(QPen(de.color, 1.0, Qt::DotLine));
+        p.setBrush(Qt::NoBrush);
+
+        // --- Center measurement line (solid, spans full extent) ----------
+        p.setPen(QPen(de.color, 1.5, Qt::SolidLine));
         p.drawLine(wMin, wMax);
+
+        // --- End caps: two-tier tick (outer + inner gap) at each end -----
+        p.setPen(QPen(de.color, 2.0));
+        // Min end
+        p.drawLine(wMin + perp * kTickOuter, wMin - perp * kTickOuter);
+        p.setPen(QPen(de.color, 1.5));
+        p.drawLine(wMin + perp * kTickInner, wMin - perp * kTickInner);
+        // Max end
+        p.setPen(QPen(de.color, 2.0));
+        p.drawLine(wMax + perp * kTickOuter, wMax - perp * kTickOuter);
+        p.setPen(QPen(de.color, 1.5));
+        p.drawLine(wMax + perp * kTickInner, wMax - perp * kTickInner);
     }
 }
 

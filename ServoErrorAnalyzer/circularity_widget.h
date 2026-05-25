@@ -36,7 +36,6 @@ private:
 
     // Paint sub-steps
     void drawBackground(QPainter &p);
-    void drawDirectionLines(QPainter &p);
     void drawCommandTrajectory(QPainter &p);  // command path (orange dashed)
     void drawTrajectory(QPainter &p);         // feedback path (blue solid)
     void drawSizeBars(QPainter &p);    // geometry (clipped)
