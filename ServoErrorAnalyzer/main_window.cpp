@@ -47,7 +47,8 @@ MainWindow::MainWindow(QWidget *parent)
 
 void MainWindow::setupUi()
 {
-    setWindowTitle("Servo Error Analyzer");
+    setWindowTitle(QString::fromUtf8(
+        "\xe4\xbc\xba\xe6\x9c\x8d\xe8\xaf\xaf\xe5\xb7\xae\xe5\x88\x86\xe6\x9e\x90\xe4\xbb\xaa"));  // 伺服误差分析仪
     resize(1200, 750);
     setAcceptDrops(true);
 
@@ -70,15 +71,18 @@ void MainWindow::setupUi()
 
 void MainWindow::setupMenuBar()
 {
-    QMenu *fileMenu = menuBar()->addMenu("&File");
+    QMenu *fileMenu = menuBar()->addMenu(
+        QString::fromUtf8("\xe6\x96\x87\xe4\xbb\xb6(&F)"));  // 文件
 
-    QAction *openAct = fileMenu->addAction("&Open...");
+    QAction *openAct = fileMenu->addAction(
+        QString::fromUtf8("\xe6\x89\x93\xe5\xbc\x80(&O)..."));  // 打开
     openAct->setShortcut(QKeySequence::Open);
     connect(openAct, &QAction::triggered, this, &MainWindow::onOpenFile);
 
     fileMenu->addSeparator();
 
-    QAction *exitAct = fileMenu->addAction("E&xit");
+    QAction *exitAct = fileMenu->addAction(
+        QString::fromUtf8("\xe9\x80\x80\xe5\x87\xba(&X)"));  // 退出
     exitAct->setShortcut(QKeySequence::Quit);
     connect(exitAct, &QAction::triggered, this, &QWidget::close);
 }
@@ -87,10 +91,12 @@ void MainWindow::setupMenuBar()
 
 void MainWindow::setupToolBar()
 {
-    m_toolBar = addToolBar("Main");
+    m_toolBar = addToolBar(
+        QString::fromUtf8("\xe4\xb8\xbb\xe5\xb7\xa5\xe5\x85\xb7\xe6\xa0\x8f"));  // 主工具栏
     m_toolBar->setMovable(false);
 
-    QAction *openAct = m_toolBar->addAction("Open");
+    QAction *openAct = m_toolBar->addAction(
+        QString::fromUtf8("\xe6\x89\x93\xe5\xbc\x80"));  // 打开
     connect(openAct, &QAction::triggered, this, &MainWindow::onOpenFile);
 
     m_toolBar->addSeparator();
@@ -115,14 +121,19 @@ void MainWindow::setupToolBar()
 
 void MainWindow::setupCursorDock()
 {
-    QDockWidget *dock = new QDockWidget("Cursor Info", this);
+    QDockWidget *dock = new QDockWidget(
+        QString::fromUtf8("\xe5\x85\x89\xe6\xa0\x87\xe4\xbf\xa1\xe6\x81\xaf"), this);  // 光标信息
     dock->setFeatures(QDockWidget::NoDockWidgetFeatures);
 
     QWidget *container = new QWidget();
     QHBoxLayout *lay = new QHBoxLayout(container);
     lay->setContentsMargins(8, 4, 8, 4);
 
-    m_lblCursor = new QLabel("Move mouse over chart to see error values");
+    // 在图表上移动鼠标以查看误差值
+    m_lblCursor = new QLabel(QString::fromUtf8(
+        "\xe5\x9c\xa8\xe5\x9b\xbe\xe8\xa1\xa8\xe4\xb8\x8a\xe7\xa7\xbb\xe5\x8a\xa8"
+        "\xe9\xbc\xa0\xe6\xa0\x87\xe4\xbb\xa5\xe6\x9f\xa5\xe7\x9c\x8b\xe8\xaf\xaf"
+        "\xe5\xb7\xae\xe5\x80\xbc"));
     m_lblCursor->setWordWrap(true);
     m_lblCursor->setTextFormat(Qt::RichText);
     lay->addWidget(m_lblCursor);
@@ -136,14 +147,18 @@ void MainWindow::setupCursorDock()
 
 void MainWindow::setupResponseDock()
 {
-    QDockWidget *dock = new QDockWidget("Response Time", this);
+    QDockWidget *dock = new QDockWidget(
+        QString::fromUtf8("\xe5\x93\x8d\xe5\xba\x94\xe6\x97\xb6\xe9\x97\xb4"), this);  // 响应时间
     dock->setFeatures(QDockWidget::NoDockWidgetFeatures);
 
     QWidget *outer = new QWidget();
     QVBoxLayout *outerLayout = new QVBoxLayout(outer);
     outerLayout->setContentsMargins(8, 8, 8, 8);
 
-    m_lblRespTitle = new QLabel("Load a CSV file to see analysis");
+    // 请加载 CSV 文件以查看分析
+    m_lblRespTitle = new QLabel(QString::fromUtf8(
+        "\xe8\xaf\xb7\xe5\x8a\xa0\xe8\xbd\xbd CSV "
+        "\xe6\x96\x87\xe4\xbb\xb6\xe4\xbb\xa5\xe6\x9f\xa5\xe7\x9c\x8b\xe5\x88\x86\xe6\x9e\x90"));
     m_lblRespTitle->setWordWrap(true);
     m_lblRespTitle->setStyleSheet("font-weight: bold; font-size: 13px; color: #555;");
     outerLayout->addWidget(m_lblRespTitle);
@@ -171,7 +186,13 @@ void MainWindow::setupResponseDock()
 
 void MainWindow::setupStatusBar()
 {
-    m_lblFileInfo = new QLabel("No file loaded.  File > Open or drag a CSV onto the chart.");
+    // 未加载文件。请从 文件 > 打开 菜单，或将 CSV 文件拖入图表。
+    m_lblFileInfo = new QLabel(QString::fromUtf8(
+        "\xe6\x9c\xaa\xe5\x8a\xa0\xe8\xbd\xbd\xe6\x96\x87\xe4\xbb\xb6\xe3\x80\x82"
+        "\xe8\xaf\xb7\xe4\xbb\x8e \xe6\x96\x87\xe4\xbb\xb6 > "
+        "\xe6\x89\x93\xe5\xbc\x80 \xe8\x8f\x9c\xe5\x8d\x95\xef\xbc\x8c"
+        "\xe6\x88\x96\xe5\xb0\x86 CSV "
+        "\xe6\x96\x87\xe4\xbb\xb6\xe6\x8b\x96\xe5\x85\xa5\xe5\x9b\xbe\xe8\xa1\xa8\xe3\x80\x82"));
     statusBar()->addWidget(m_lblFileInfo);
 }
 
@@ -220,7 +241,10 @@ void MainWindow::rebuildAxisWidgets(const QStringList &axisNames)
 void MainWindow::onOpenFile()
 {
     QString path = QFileDialog::getOpenFileName(
-        this, "Open CSV Data File", QString(),
+        this,
+        // 打开 CSV 数据文件
+        QString::fromUtf8("\xe6\x89\x93\xe5\xbc\x80 CSV \xe6\x95\xb0\xe6\x8d\xae\xe6\x96\x87\xe4\xbb\xb6"),
+        QString(),
         "CSV Files (*.csv);;All Files (*)");
     if (!path.isEmpty())
         loadFile(path);
@@ -235,7 +259,10 @@ void MainWindow::onCursorMoved(double time, int idx,
                                const QMap<QString, double> &errors)
 {
     // Bottom panel: error values — dynamic table
-    QString text = QString("<table><tr><td><b>Time:</b></td><td>%1 s</td></tr>").arg(time, 0, 'f', 6);
+    // 时间：
+    QString text = QString::fromUtf8(
+        "<table><tr><td><b>\xe6\x97\xb6\xe9\x97\xb4\xef\xbc\x9a</b></td>"
+        "<td>%1 s</td></tr>").arg(time, 0, 'f', 6);
 
     for (auto it = errors.begin(); it != errors.end(); ++it) {
         const QString &name = it.key();
@@ -244,7 +271,11 @@ void MainWindow::onCursorMoved(double time, int idx,
         QColor c = m_chartView->isSeriesVisible(name)
                        ? ChartView::axisColor(m_curData.axisOrder.indexOf(name))
                        : QColor(128, 128, 128);
-        text += QString("<tr><td><b style='color:%1'>%2 Error:</b></td><td>%3 %4</td></tr>")
+        // %2 误差：
+        text += QString::fromUtf8(
+            "<tr><td><b style='color:%1'>%2 "
+            "\xe8\xaf\xaf\xe5\xb7\xae\xef\xbc\x9a</b></td>"
+            "<td>%3 %4</td></tr>")
                     .arg(c.name()).arg(name).arg(err, 0, 'f', 6).arg(unit);
     }
     text += "</table>";
@@ -275,7 +306,9 @@ void MainWindow::loadFile(const QString &filePath)
     Dataset data;
     QString error;
     if (!DataLoader::loadCsv(filePath, data, &error)) {
-        QMessageBox::warning(this, "Load Error", error);
+        QMessageBox::warning(this,
+            QString::fromUtf8("\xe5\x8a\xa0\xe8\xbd\xbd\xe9\x94\x99\xe8\xaf\xaf"),  // 加载错误
+            error);
         return;
     }
 
@@ -288,13 +321,24 @@ void MainWindow::loadFile(const QString &filePath)
     if (m_dirDialog && m_dirDialog->isVisible())
         m_dirDialog->updateData(m_curData);
 
-    m_lblRespTitle->setText(
-        "<b>Response Time</b>  <span style='color:#888;font-size:11px;'>(cursor point detail)</span>");
+    // <b>响应时间</b>  <span>(光标点详情)</span>
+    m_lblRespTitle->setText(QString::fromUtf8(
+        "<b>\xe5\x93\x8d\xe5\xba\x94\xe6\x97\xb6\xe9\x97\xb4</b>"
+        "  <span style='color:#888;font-size:11px;'>"
+        "(\xe5\x85\x89\xe6\xa0\x87\xe7\x82\xb9\xe8\xaf\xa6\xe6\x83\x85)"
+        "</span>"));
 
     QFileInfo fi(filePath);
-    m_lblFileInfo->setText(QString("File: %1  |  %2 data points")
+    // 文件：%1  |  %2 个数据点
+    m_lblFileInfo->setText(
+        QString::fromUtf8("\xe6\x96\x87\xe4\xbb\xb6\xef\xbc\x9a%1  |  %2 "
+                          "\xe4\xb8\xaa\xe6\x95\xb0\xe6\x8d\xae\xe7\x82\xb9")
         .arg(fi.fileName()).arg(data.size()));
-    setWindowTitle(QString("Servo Error Analyzer - %1").arg(fi.fileName()));
+    // 伺服误差分析仪 - %1
+    setWindowTitle(
+        QString::fromUtf8("\xe4\xbc\xba\xe6\x9c\x8d\xe8\xaf\xaf\xe5\xb7\xae"
+                          "\xe5\x88\x86\xe6\x9e\x90\xe4\xbb\xaa - %1")
+        .arg(fi.fileName()));
 }
 
 // --- Response panel: per-point detail -----------------------------------
@@ -318,14 +362,21 @@ void MainWindow::updateResponseAt(int idx)
         double endPos   = ch.fb[j];
         double resp     = ch.respLag[idx];
 
-        QString html = QString(
-            "<div style='font-weight:bold;font-size:14px;margin-bottom:4px;'>%1 Axis</div>"
+        // %1轴 / 起始时间 / 结束时间 / 起始位置 / 到达位置 / 响应延迟
+        QString html = QString::fromUtf8(
+            "<div style='font-weight:bold;font-size:14px;margin-bottom:4px;'>"
+            "%1 \xe8\xbd\xb4</div>"
             "<table style='font-size:12px;' cellspacing=1>"
-            "<tr><td>Start Time</td><td align=right><b>%2 s</b></td></tr>"
-            "<tr><td>End Time</td><td align=right><b>%3 s</b></td></tr>"
-            "<tr><td>Start Pos</td><td align=right>%4</td></tr>"
-            "<tr><td>End Pos</td><td align=right>%5</td></tr>"
-            "<tr><td>Response</td><td align=right><b>%6</b></td></tr>"
+            "<tr><td>\xe8\xb5\xb7\xe5\xa7\x8b\xe6\x97\xb6\xe9\x97\xb4</td>"
+            "<td align=right><b>%2 s</b></td></tr>"
+            "<tr><td>\xe7\xbb\x93\xe6\x9d\x9f\xe6\x97\xb6\xe9\x97\xb4</td>"
+            "<td align=right><b>%3 s</b></td></tr>"
+            "<tr><td>\xe8\xb5\xb7\xe5\xa7\x8b\xe4\xbd\x8d\xe7\xbd\xae</td>"
+            "<td align=right>%4</td></tr>"
+            "<tr><td>\xe5\x88\xb0\xe8\xbe\xbe\xe4\xbd\x8d\xe7\xbd\xae</td>"
+            "<td align=right>%5</td></tr>"
+            "<tr><td>\xe5\x93\x8d\xe5\xba\x94\xe5\xbb\xb6\xe8\xbf\x9f</td>"
+            "<td align=right><b>%6</b></td></tr>"
             "</table>"
         ).arg(name)
          .arg(t0, 0, 'f', 6)

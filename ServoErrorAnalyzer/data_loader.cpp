@@ -10,7 +10,10 @@ bool DataLoader::loadCsv(const QString &filePath, Dataset &out, QString *error)
 {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        if (error) *error = QString("Cannot open file: %1").arg(filePath);
+        // 无法打开文件：
+        if (error) *error = QString::fromUtf8(
+            "\xe6\x97\xa0\xe6\xb3\x95\xe6\x89\x93\xe5\xbc\x80\xe6\x96\x87\xe4\xbb\xb6\xef\xbc\x9a%1")
+            .arg(filePath);
         return false;
     }
 
@@ -18,7 +21,10 @@ bool DataLoader::loadCsv(const QString &filePath, Dataset &out, QString *error)
     QString headerLine = stream.readLine();
 
     if (headerLine.isEmpty()) {
-        if (error) *error = "File is empty or missing header.";
+        // 文件为空或缺少标题行。
+        if (error) *error = QString::fromUtf8(
+            "\xe6\x96\x87\xe4\xbb\xb6\xe4\xb8\xba\xe7\xa9\xba\xe6\x88\x96"
+            "\xe7\xbc\xba\xe5\xb0\x91\xe6\xa0\x87\xe9\xa2\x98\xe8\xa1\x8c\xe3\x80\x82");
         return false;
     }
 
@@ -61,7 +67,11 @@ bool DataLoader::loadCsv(const QString &filePath, Dataset &out, QString *error)
     }
 
     if (timeCol < 0) {
-        if (error) *error = "Cannot find time column (FINISHED) in header.";
+        // 在标题行中未找到时间列（FINISHED）。
+        if (error) *error = QString::fromUtf8(
+            "\xe5\x9c\xa8\xe6\xa0\x87\xe9\xa2\x98\xe8\xa1\x8c\xe4\xb8\xad\xe6\x9c\xaa"
+            "\xe6\x89\xbe\xe5\x88\xb0\xe6\x97\xb6\xe9\x97\xb4\xe5\x88\x97"
+            "\xef\xbc\x88""FINISHED\xef\xbc\x89\xe3\x80\x82");
         return false;
     }
 
@@ -133,7 +143,10 @@ bool DataLoader::loadCsv(const QString &filePath, Dataset &out, QString *error)
     }
 
     if (out.isEmpty()) {
-        if (error) *error = "No valid data rows found in file.";
+        // 文件中未找到有效数据行。
+        if (error) *error = QString::fromUtf8(
+            "\xe6\x96\x87\xe4\xbb\xb6\xe4\xb8\xad\xe6\x9c\xaa\xe6\x89\xbe\xe5\x88\xb0"
+            "\xe6\x9c\x89\xe6\x95\x88\xe6\x95\xb0\xe6\x8d\xae\xe8\xa1\x8c\xe3\x80\x82");
         return false;
     }
 

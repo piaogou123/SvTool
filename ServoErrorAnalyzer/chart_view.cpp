@@ -280,7 +280,8 @@ void ChartView::drawGrid(QPainter &p)
         p.setPen(Qt::black);
         font.setPixelSize(11);
         p.setFont(font);
-        p.drawText(xLabel, Qt::AlignHCenter, "Time (s)");
+        p.drawText(xLabel, Qt::AlignHCenter,
+            QString::fromUtf8("\xe6\x97\xb6\xe9\x97\xb4 (s)"));  // 时间 (s)
         font.setPixelSize(10);
         p.setFont(font);
     }
@@ -310,7 +311,8 @@ void ChartView::drawGrid(QPainter &p)
         p.save();
         p.translate(12, m_plotArea.center().y());
         p.rotate(-90);
-        p.drawText(QRectF(-50, -10, 100, 20), Qt::AlignCenter, "Error");
+        p.drawText(QRectF(-50, -10, 100, 20), Qt::AlignCenter,
+            QString::fromUtf8("\xe8\xaf\xaf\xe5\xb7\xae"));  // 误差
         p.restore();
     }
 
@@ -375,8 +377,9 @@ void ChartView::drawCurves(QPainter &p)
         p.setBrush(c);
         p.drawRect(QRectF(lx, ly, 16, 3));
         p.setPen(Qt::black);
+        // %1 误差
         p.drawText(QRectF(lx + 20, ly - 7, 110, 16), Qt::AlignLeft,
-                   QString("%1 Error").arg(name));
+                   name + QString::fromUtf8(" \xe8\xaf\xaf\xe5\xb7\xae"));
         ly += 18;
     }
     p.restore();
