@@ -31,10 +31,14 @@ private:
     void drawBackground(QPainter &p);
     void drawDirectionLines(QPainter &p);
     void drawReferenceCircles(QPainter &p);
-    void drawTrajectory(QPainter &p);
+    void drawCommandTrajectory(QPainter &p);  // command path (orange dashed)
+    void drawTrajectory(QPainter &p);         // feedback path (blue solid)
     void drawSizeBars(QPainter &p);    // geometry (clipped)
     void drawSizeLabels(QPainter &p); // text (unclipped)
     void drawOverlay(QPainter &p);
+
+    // Command data (raw positions)
+    QVector<double> m_cmdx, m_cmdy;
 
     // Feedback data (raw positions)
     QVector<double> m_fx, m_fy;

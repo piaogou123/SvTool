@@ -44,6 +44,8 @@ CircularityWidget::CircularityWidget(QWidget *parent)
 void CircularityWidget::setData(const Dataset &data)
 {
     m_hasData = false;
+    m_cmdx.clear();
+    m_cmdy.clear();
     m_fx.clear();
     m_fy.clear();
     m_dirs.clear();
@@ -53,6 +55,8 @@ void CircularityWidget::setData(const Dataset &data)
         return;
     }
 
+    m_cmdx = data.axes["X"].cmd;
+    m_cmdy = data.axes["Y"].cmd;
     m_fx = data.axes["X"].fb;
     m_fy = data.axes["Y"].fb;
     const int n = m_fx.size();
@@ -98,6 +102,15 @@ void CircularityWidget::setData(const Dataset &data)
         m_dirs.append(de);
         maxExt = std::max(maxExt, std::max(std::abs(pMin), std::abs(pMax)));
     }
+
+    // Also consider command trajectory extents so both fit in view
+    const int nc = m_cmdx.size();
+    for (int i = 0; i < nc; ++i) {
+        double r = std::sqrt((m_cmdx[i] - m_cx) * (m_cmdx[i] - m_cx)
+                           + (m_cmdy[i] - m_cy) * (m_cmdy[i] - m_cy));
+        maxExt = std::max(maxExt, r);
+    }
+
     m_dataRange = (maxExt > 0) ? maxExt * 1.2 : 1.0;
 
     m_hasData = true;
@@ -167,7 +180,8 @@ void CircularityWidget::paintEvent(QPaintEvent *)
     drawBackground(p);
     drawDirectionLines(p);
     drawReferenceCircles(p);
-    drawTrajectory(p);
+    drawCommandTrajectory(p);   // command path drawn first (below feedback)
+    drawTrajectory(p);           // feedback path on top
     drawSizeBars(p);   // lines clipped; labels drawn separately below
     p.setClipping(false);
 
@@ -242,6 +256,26 @@ void CircularityWidget::drawReferenceCircles(QPainter &p)
     // Average radius (nominal circle)
     p.setPen(QPen(QColor(160, 160, 210), 1.5, Qt::SolidLine));
     drawCircleSafe(p, cw, m_avgRadius * scale);
+}
+
+void CircularityWidget::drawCommandTrajectory(QPainter &p)
+{
+    if (m_cmdx.isEmpty()) return;
+
+    const int kMaxPts = 8000;
+    int step = std::max(1, m_cmdx.size() / kMaxPts);
+
+    QPainterPath path;
+    path.moveTo(toWidget(m_cmdx[0], m_cmdy[0]));
+    for (int i = step; i < m_cmdx.size(); i += step)
+        path.lineTo(toWidget(m_cmdx[i], m_cmdy[i]));
+    path.lineTo(toWidget(m_cmdx[0], m_cmdy[0]));
+
+    QPen pen(QColor(220, 100, 0), 1.5, Qt::DashLine);
+    pen.setDashPattern({6, 4});
+    p.setPen(pen);
+    p.setBrush(Qt::NoBrush);
+    p.drawPath(path);
 }
 
 void CircularityWidget::drawTrajectory(QPainter &p)
@@ -349,6 +383,31 @@ void CircularityWidget::drawOverlay(QPainter &p)
         "\xe5\x8f\x8c\xe5\x87\xbb\xe5\xa4\x8d\xe4\xbd\x8d");
     p.drawText(plot.adjusted(0, 0, -4, -4),
                Qt::AlignBottom | Qt::AlignRight, hint);
+
+    // Legend — bottom-left
+    {
+        int lx = plot.left() + 8;
+        int ly = plot.bottom() - 34;
+        p.setFont(QFont("Arial", 8, QFont::Bold));
+
+        // Command line sample (orange dashed)
+        QPen cmdPen(QColor(220, 100, 0), 1.5, Qt::DashLine);
+        cmdPen.setDashPattern({6, 4});
+        p.setPen(cmdPen);
+        p.drawLine(lx, ly + 5, lx + 22, ly + 5);
+        p.setPen(QColor(220, 100, 0));
+        // 指令
+        p.drawText(lx + 26, ly + 9,
+            QString::fromUtf8("\xe6\x8c\x87\xe4\xbb\xa4"));
+
+        // Feedback line sample (blue solid)
+        p.setPen(QPen(QColor(0, 80, 200), 1.5));
+        p.drawLine(lx, ly + 20, lx + 22, ly + 20);
+        p.setPen(QColor(0, 80, 200));
+        // 反馈
+        p.drawText(lx + 26, ly + 24,
+            QString::fromUtf8("\xe5\x8f\x8d\xe9\xa6\x88"));
+    }
 }
 
 // -------------------------------------------------------------------------
