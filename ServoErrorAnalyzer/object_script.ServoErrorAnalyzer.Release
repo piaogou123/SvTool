@@ -1,0 +1,10 @@
+release/main.o
+release/main_window.o
+release/data_loader.o
+release/chart_view.o
+release/direction_dialog.o
+release/circularity_widget.o
+release/moc_main_window.o
+release/moc_chart_view.o
+release/moc_direction_dialog.o
+release/moc_circularity_widget.o
