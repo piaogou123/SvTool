@@ -179,7 +179,6 @@ void CircularityWidget::paintEvent(QPaintEvent *)
     p.setClipRect(plot);
     drawBackground(p);
     drawDirectionLines(p);
-    drawReferenceCircles(p);
     drawCommandTrajectory(p);   // command path drawn first (below feedback)
     drawTrajectory(p);           // feedback path on top
     drawSizeBars(p);   // lines clipped; labels drawn separately below
@@ -220,42 +219,6 @@ void CircularityWidget::drawDirectionLines(QPainter &p)
         p.setPen(pen);
         p.drawLine(cw - dir, cw + dir);
     }
-}
-
-// Draw a circle safely: Qt's rasterizer overflows for radii > ~16 k px.
-// For very large radii we build a QPainterPath so Qt clips via the path
-// rather than the ellipse primitive.
-static void drawCircleSafe(QPainter &p, QPointF cw, double r_px)
-{
-    if (r_px <= 0) return;
-    if (r_px > 8000.0) {
-        // Use addEllipse on a path; Qt clips paths more robustly
-        QPainterPath path;
-        path.addEllipse(cw, r_px, r_px);
-        p.drawPath(path);
-    } else {
-        p.drawEllipse(cw, r_px, r_px);
-    }
-}
-
-void CircularityWidget::drawReferenceCircles(QPainter &p)
-{
-    if (m_avgRadius <= 0) return;
-    double scale = m_fitScale * m_zoom;
-    QPointF cw = toWidget(m_cx, m_cy);
-    p.setBrush(Qt::NoBrush);
-
-    // Min radius circle (inner bound)
-    p.setPen(QPen(QColor(200, 200, 240), 1.2, Qt::DotLine));
-    drawCircleSafe(p, cw, m_minRadius * scale);
-
-    // Max radius circle (outer bound)
-    p.setPen(QPen(QColor(240, 200, 200), 1.2, Qt::DotLine));
-    drawCircleSafe(p, cw, m_maxRadius * scale);
-
-    // Average radius (nominal circle)
-    p.setPen(QPen(QColor(160, 160, 210), 1.5, Qt::SolidLine));
-    drawCircleSafe(p, cw, m_avgRadius * scale);
 }
 
 void CircularityWidget::drawCommandTrajectory(QPainter &p)
