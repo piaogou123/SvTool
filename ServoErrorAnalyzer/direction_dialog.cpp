@@ -38,7 +38,7 @@ DirectionDialog::DirectionDialog(QWidget *parent)
     // 方向尺寸分析
     setWindowTitle(QString::fromUtf8(
         "\xe6\x96\xb9\xe5\x90\x91\xe5\xb0\xba\xe5\xaf\xb8\xe5\x88\x86\xe6\x9e\x90"));
-    resize(1100, 580);
+    resize(720, 760);
 }
 
 void DirectionDialog::setupUi()
@@ -47,17 +47,17 @@ void DirectionDialog::setupUi()
     root->setContentsMargins(8, 8, 8, 8);
     root->setSpacing(6);
 
-    QSplitter *splitter = new QSplitter(Qt::Horizontal, this);
+    QSplitter *splitter = new QSplitter(Qt::Vertical, this);
 
-    // ---- Left: circularity chart ----------------------------------------
+    // ---- Top: circularity chart -----------------------------------------
     m_chart = new CircularityWidget(splitter);
-    m_chart->setMinimumSize(400, 400);
+    m_chart->setMinimumSize(400, 360);
     splitter->addWidget(m_chart);
 
-    // ---- Right: stats table ---------------------------------------------
+    // ---- Bottom: stats table --------------------------------------------
     QWidget *rightPanel = new QWidget(splitter);
     QVBoxLayout *rlay = new QVBoxLayout(rightPanel);
-    rlay->setContentsMargins(4, 0, 0, 0);
+    rlay->setContentsMargins(0, 4, 0, 0);
     rlay->setSpacing(4);
 
     // 请先加载 CSV 文件
@@ -109,8 +109,8 @@ void DirectionDialog::setupUi()
     rlay->addWidget(m_table, 1);
     splitter->addWidget(rightPanel);
 
-    // Chart gets ~55% of width, table gets ~45%
-    splitter->setSizes({ 540, 460 });
+    // Chart gets ~60% of height, table gets ~40%
+    splitter->setSizes({ 420, 280 });
     splitter->setCollapsible(0, false);
     splitter->setCollapsible(1, false);
 
