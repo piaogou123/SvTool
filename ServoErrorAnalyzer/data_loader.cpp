@@ -165,62 +165,6 @@ bool DataLoader::loadCsv(const QString &filePath, Dataset &out, QString *error)
 
 // --- Response-time computation -----------------------------------------
 
-// Find indices where the command signal changes direction (peaks/valleys).
-// Uses cumulative retreat from the running extremum, not single-step size,
-// so that gradual reversals are detected promptly.
-static QVector<int> findTurningPoints(const QVector<double> &cmd, double eps)
-{
-    QVector<int> turns;
-    int n = cmd.size();
-    if (n < 3) return turns;
-
-    int state = 0;               // 0=unknown, 1=up, -1=down
-    double extremum = cmd[0];
-    int extremumIdx = 0;
-    double startVal = cmd[0];
-
-    for (int i = 1; i < n; ++i) {
-        if (state == 0) {
-            // Use cumulative displacement from start to determine initial direction.
-            // Single-step threshold would miss slow accelerations from standstill.
-            double disp = cmd[i] - startVal;
-            if (disp > eps) {
-                state = 1;
-                extremum = cmd[i];
-                extremumIdx = i;
-            } else if (disp < -eps) {
-                state = -1;
-                extremum = cmd[i];
-                extremumIdx = i;
-            }
-        } else if (state == 1) {
-            if (cmd[i] > extremum) {
-                extremum = cmd[i];
-                extremumIdx = i;
-            } else if (extremum - cmd[i] > eps) {
-                // Cumulative retreat from peak exceeds threshold → reversal
-                turns.append(extremumIdx);
-                state = -1;
-                extremum = cmd[i];
-                extremumIdx = i;
-            }
-        } else {  // state == -1
-            if (cmd[i] < extremum) {
-                extremum = cmd[i];
-                extremumIdx = i;
-            } else if (cmd[i] - extremum > eps) {
-                // Cumulative rise from valley exceeds threshold → reversal
-                turns.append(extremumIdx);
-                state = 1;
-                extremum = cmd[i];
-                extremumIdx = i;
-            }
-        }
-    }
-
-    return turns;
-}
-
 static bool commandIsStaticAt(const QVector<double> &cmd, int i, double eps)
 {
     const int n = cmd.size();
@@ -250,7 +194,6 @@ static void computeOneAxis(const QVector<double> &time,
                            const QVector<double> &fb,
                            QVector<double> &lagOut,
                            QVector<int>    &idxOut,
-                           ResponseStats &statsOut,
                            int maxAhead)
 {
     int n = time.size();
@@ -393,33 +336,32 @@ static void computeOneAxis(const QVector<double> &time,
         idxOut[i] = bestJ;
     }
 
-    // Statistics
-    if (n == 0) return;
-
-    // Min/max via single O(n) pass
-    const auto minMaxPair = std::minmax_element(lagOut.begin(), lagOut.end());
-    statsOut.min = *minMaxPair.first;
-    statsOut.max = *minMaxPair.second;
-
-    // Median via std::nth_element (O(n) average) instead of full sort
-    QVector<double> sorted = lagOut;
-    if (n % 2 == 1) {
-        std::nth_element(sorted.begin(), sorted.begin() + n / 2, sorted.end());
-        statsOut.median = sorted[n / 2];
-    } else {
-        std::nth_element(sorted.begin(), sorted.begin() + n / 2 - 1, sorted.end());
-        const double lower = sorted[n / 2 - 1];
-        const double upper = *std::min_element(sorted.begin() + n / 2, sorted.end());
-        statsOut.median = (lower + upper) / 2.0;
-    }
-
-    double sum = 0;
-    for (double v : lagOut) sum += v;
-    statsOut.avg = sum / n;
-
-    double sqSum = 0;
-    for (double v : lagOut) sqSum += (v - statsOut.avg) * (v - statsOut.avg);
-    statsOut.stdDev = std::sqrt(sqSum / n);
+    // ResponseStats (min/max/avg/median/stdDev) are intentionally not
+    // computed here — the fields exist in AxisChannel::stats but are not
+    // currently displayed in the UI.  Uncomment the block below if a
+    // statistics panel is added in the future.
+    //
+    // if (n == 0) return;
+    // const auto minMaxPair = std::minmax_element(lagOut.begin(), lagOut.end());
+    // statsOut.min = *minMaxPair.first;
+    // statsOut.max = *minMaxPair.second;
+    // QVector<double> sorted = lagOut;
+    // if (n % 2 == 1) {
+    //     std::nth_element(sorted.begin(), sorted.begin() + n / 2, sorted.end());
+    //     statsOut.median = sorted[n / 2];
+    // } else {
+    //     std::nth_element(sorted.begin(), sorted.begin() + n / 2 - 1, sorted.end());
+    //     const double lower = sorted[n / 2 - 1];
+    //     const double upper = *std::min_element(sorted.begin() + n / 2,
+    //                                            sorted.end());
+    //     statsOut.median = (lower + upper) / 2.0;
+    // }
+    // double sum = 0;
+    // for (double v : lagOut) sum += v;
+    // statsOut.avg = sum / n;
+    // double sqSum = 0;
+    // for (double v : lagOut) sqSum += (v - statsOut.avg) * (v - statsOut.avg);
+    // statsOut.stdDev = std::sqrt(sqSum / n);
 }
 
 // --- Direction-statistics computation ------------------------------------
@@ -440,23 +382,6 @@ static DirectionStats computeOneDirection(const QString &name,
     s.fbSize = *fbMinMax.second - *fbMinMax.first;
 
     s.sizeErr = s.fbSize - s.cmdSize;
-
-    QVector<double> err(n);
-    for (int i = 0; i < n; ++i)
-        err[i] = cmdProj[i] - fbProj[i];
-
-    const auto errMinMax = std::minmax_element(err.begin(), err.end());
-    s.errMin = *errMinMax.first;
-    s.errMax = *errMinMax.second;
-
-    double sum = 0;
-    for (double v : err) sum += v;
-    s.errAvg = sum / n;
-
-    double sqSum = 0;
-    for (double v : err) sqSum += (v - s.errAvg) * (v - s.errAvg);
-    s.errStdDev = std::sqrt(sqSum / n);
-
     s.valid = true;
     return s;
 }
@@ -514,6 +439,6 @@ void DataLoader::computeResponseTime(Dataset &data, int maxLookaheadSamples)
     for (auto &name : data.axisOrder) {
         AxisChannel &ch = data.axes[name];
         computeOneAxis(data.time, ch.cmd, ch.fb,
-                       ch.respLag, ch.bestIdx, ch.stats, maxLookaheadSamples);
+                       ch.respLag, ch.bestIdx, maxLookaheadSamples);
     }
 }

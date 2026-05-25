@@ -19,10 +19,6 @@ struct DirectionStats {
     double  cmdSize  = 0;   // 指令尺寸: max(cmd_proj) - min(cmd_proj)
     double  fbSize   = 0;   // 反馈尺寸: max(fb_proj)  - min(fb_proj)
     double  sizeErr  = 0;   // 尺寸偏差: fbSize - cmdSize
-    double  errMax   = 0;   // 跟随误差最大值 (cmd - fb)
-    double  errMin   = 0;   // 跟随误差最小值
-    double  errAvg   = 0;   // 跟随误差均值
-    double  errStdDev = 0;  // 跟随误差标准差
     bool    valid    = false;
 };
 
