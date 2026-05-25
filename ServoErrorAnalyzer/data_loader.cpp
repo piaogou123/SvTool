@@ -367,6 +367,15 @@ static void computeOneAxis(const QVector<double> &time,
                 bestDiff = diff;
                 bestJ = j;
             }
+            // Stop at the first crossing of the target in the commanded
+            // direction.  After fb crosses, further oscillation can produce
+            // a closer match on the return pass, which would be reported as
+            // a spuriously longer lag.
+            if (dir != 0 &&
+                ((dir == 1 && fb[j] >= target) ||
+                 (dir == -1 && fb[j] <= target))) {
+                break;
+            }
         }
 
         lagOut[i] = time[bestJ] - time[i];
