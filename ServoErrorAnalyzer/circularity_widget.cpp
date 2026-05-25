@@ -278,8 +278,10 @@ void CircularityWidget::drawSizeBars(QPainter &p)
 
         p.setBrush(Qt::NoBrush);
 
-        // --- Center measurement line (solid, spans full extent) ----------
-        p.setPen(QPen(de.color, 1.5, Qt::SolidLine));
+        // --- Center measurement line (dashed, spans full extent) ---------
+        QPen dashPen(de.color, 1.5, Qt::DashLine);
+        dashPen.setDashPattern({6, 4});
+        p.setPen(dashPen);
         p.drawLine(wMin, wMax);
 
         // --- End caps: two-tier tick (outer + inner gap) at each end -----
