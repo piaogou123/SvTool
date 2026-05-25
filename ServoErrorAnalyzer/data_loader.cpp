@@ -318,6 +318,7 @@ static void computeOneAxis(const QVector<double> &time,
 
         bool tracking = false;
         double fbExt = 0;
+        bool reachedTarget = false;
 
         for (int j = i + 1; j < jEnd; ++j) {
             // Resolve fb's effective direction: prefer the responsive
@@ -374,8 +375,19 @@ static void computeOneAxis(const QVector<double> &time,
             if (dir != 0 &&
                 ((dir == 1 && fb[j] >= target) ||
                  (dir == -1 && fb[j] <= target))) {
+                reachedTarget = true;
                 break;
             }
+        }
+
+        // A response point must be an actual same-direction arrival at the
+        // target.  Near a segment peak, fb can lag so far behind lp that it
+        // reverses before ever reaching lp[i]; reporting the closest peak
+        // sample as the "end" would be a false response time.
+        if (dir != 0 && !reachedTarget) {
+            lagOut[i] = 0.0;
+            idxOut[i] = i;
+            continue;
         }
 
         lagOut[i] = time[bestJ] - time[i];
