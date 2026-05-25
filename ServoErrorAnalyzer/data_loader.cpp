@@ -258,6 +258,34 @@ static void computeOneAxis(const QVector<double> &time,
                 }
             }
         }
+        // Forward-looking cmd fallback: at the static→moving boundary,
+        // every backward window falls inside the static segment and returns
+        // diff = 0.  Look ahead in cmd (all data is already available) to
+        // detect the direction of the upcoming motion.  This prevents
+        // dir = 0 from leaving the forward search unconstrained, which
+        // would allow a spurious arc-return match hundreds of ms later.
+        if (dir == 0) {
+            for (int w : {4, 8, 16, 32}) {
+                if (i + w < n) {
+                    double d = cmd[i + w] - cmd[i];
+                    if (d > eps) { dir = 1; break; }
+                    if (d < -eps) { dir = -1; break; }
+                }
+            }
+        }
+
+        // When fb is already past the target in the direction of motion
+        // (overshoot from the previous segment), there is no meaningful
+        // forward response to find.  Return lag = 0.
+        if (dir != 0) {
+            bool fb_past = (dir == 1 && fb[i] >= target) ||
+                           (dir == -1 && fb[i] <= target);
+            if (fb_past) {
+                lagOut[i] = 0.0;
+                idxOut[i] = i;
+                continue;
+            }
+        }
 
         // When fb at position i is moving opposite to cmd, the numerical
         // proximity is coincidental rather than a true response.  Reject
