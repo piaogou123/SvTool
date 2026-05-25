@@ -1,7 +1,6 @@
 #include "direction_dialog.h"
 #include "circularity_widget.h"
 
-#include <QSplitter>
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QHeaderView>
@@ -38,7 +37,8 @@ DirectionDialog::DirectionDialog(QWidget *parent)
     // 方向尺寸分析
     setWindowTitle(QString::fromUtf8(
         "\xe6\x96\xb9\xe5\x90\x91\xe5\xb0\xba\xe5\xaf\xb8\xe5\x88\x86\xe6\x9e\x90"));
-    resize(720, 760);
+    resize(960, 860);
+    setMinimumSize(600, 500);
 }
 
 void DirectionDialog::setupUi()
@@ -47,29 +47,23 @@ void DirectionDialog::setupUi()
     root->setContentsMargins(8, 8, 8, 8);
     root->setSpacing(6);
 
-    QSplitter *splitter = new QSplitter(Qt::Vertical, this);
+    // ---- Top: circularity chart — stretch=1, fills all available space ----
+    m_chart = new CircularityWidget(this);
+    m_chart->setMinimumSize(400, 400);
+    root->addWidget(m_chart, 1);   // stretch factor 1: takes all remaining height
 
-    // ---- Top: circularity chart -----------------------------------------
-    m_chart = new CircularityWidget(splitter);
-    m_chart->setMinimumSize(400, 360);
-    splitter->addWidget(m_chart);
-
-    // ---- Bottom: stats table --------------------------------------------
-    QWidget *rightPanel = new QWidget(splitter);
-    QVBoxLayout *rlay = new QVBoxLayout(rightPanel);
-    rlay->setContentsMargins(0, 4, 0, 0);
-    rlay->setSpacing(4);
-
+    // ---- Bottom: "no data" placeholder ----------------------------------
     // 请先加载 CSV 文件
     m_lblNoData = new QLabel(
         QString::fromUtf8(
             "\xe8\xaf\xb7\xe5\x85\x88\xe5\x8a\xa0\xe8\xbd\xbd CSV \xe6\x96\x87\xe4\xbb\xb6"),
-        rightPanel);
+        this);
     m_lblNoData->setAlignment(Qt::AlignCenter);
     m_lblNoData->setStyleSheet("color: #999; font-size: 13px;");
-    rlay->addWidget(m_lblNoData);
+    root->addWidget(m_lblNoData, 0);
 
-    m_table = new QTableWidget(rightPanel);
+    // ---- Bottom: stats table — fixed height, no stretch ------------------
+    m_table = new QTableWidget(this);
     m_table->setColumnCount(kColCount);
 
     QStringList hdrs;
@@ -106,15 +100,7 @@ void DirectionDialog::setupUi()
         "QHeaderView::section { font-weight: bold; font-size: 11px; padding: 3px; }");
     m_table->hide();
 
-    rlay->addWidget(m_table, 1);
-    splitter->addWidget(rightPanel);
-
-    // Chart gets ~60% of height, table gets ~40%
-    splitter->setSizes({ 420, 280 });
-    splitter->setCollapsible(0, false);
-    splitter->setCollapsible(1, false);
-
-    root->addWidget(splitter, 1);
+    root->addWidget(m_table, 0);   // stretch factor 0: stays compact at bottom
 }
 
 // -------------------------------------------------------------------------
@@ -187,8 +173,8 @@ void DirectionDialog::updateData(const Dataset &data)
     m_table->show();
     buildTable(stats);
 
-    // Resize table height to fit rows
+    // Fix table height to exactly fit its rows (no wasted space)
     int tableH = m_table->horizontalHeader()->height()
                  + stats.size() * 34 + 4;
-    m_table->setMaximumHeight(tableH + 20);
+    m_table->setFixedHeight(tableH);
 }
