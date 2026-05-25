@@ -2,8 +2,10 @@
 #include <QDialog>
 #include "data_loader.h"
 
+class CircularityWidget;
 class QTableWidget;
 class QLabel;
+class QSplitter;
 
 class DirectionDialog : public QDialog {
     Q_OBJECT
@@ -13,7 +15,9 @@ public:
 
 private:
     void setupUi();
+    void buildTable(const QVector<DirectionStats> &stats);
 
-    QTableWidget *m_table;
-    QLabel       *m_lblNoData;
+    CircularityWidget *m_chart;
+    QTableWidget      *m_table;
+    QLabel            *m_lblNoData;
 };

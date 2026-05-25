@@ -8,9 +8,11 @@ SOURCES  += main.cpp \
             main_window.cpp \
             data_loader.cpp \
             chart_view.cpp \
-            direction_dialog.cpp
+            direction_dialog.cpp \
+            circularity_widget.cpp
 
 HEADERS  += main_window.h \
             data_loader.h \
             chart_view.h \
-            direction_dialog.h
+            direction_dialog.h \
+            circularity_widget.h

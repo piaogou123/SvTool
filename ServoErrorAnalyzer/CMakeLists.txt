@@ -13,6 +13,7 @@ add_executable(ServoErrorAnalyzer
     data_loader.h data_loader.cpp
     chart_view.h chart_view.cpp
     direction_dialog.h direction_dialog.cpp
+    circularity_widget.h circularity_widget.cpp
 )
 
 target_link_libraries(ServoErrorAnalyzer PRIVATE Qt5::Widgets)
