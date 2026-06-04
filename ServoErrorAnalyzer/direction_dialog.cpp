@@ -9,6 +9,7 @@
 #include <QLabel>
 #include <QFrame>
 #include <QFont>
+#include <QCheckBox>
 
 // Row colors aligned with direction-line colors used in the chart.
 static const QColor kRowColors[] = {
@@ -62,6 +63,15 @@ static void setCardContent(QLabel *card,
     card->setText(html);
 }
 
+// Create a colored, pre-checked toggle checkbox for the chart toolbar.
+static QCheckBox *makeToggle(const QString &text, const QColor &color)
+{
+    QCheckBox *cb = new QCheckBox(text);
+    cb->setChecked(true);
+    cb->setStyleSheet(QString("color: %1; font-weight: bold;").arg(color.name()));
+    return cb;
+}
+
 // -------------------------------------------------------------------------
 
 DirectionDialog::DirectionDialog(QWidget *parent)
@@ -108,6 +118,68 @@ void DirectionDialog::setupUi()
     // ====== Middle: circularity chart — takes all remaining space =========
     m_chart = new CircularityWidget(this);
     m_chart->setMinimumSize(400, 400);
+
+    // ====== Toolbar: visibility toggles for the chart ====================
+    // Colors mirror the trajectory / direction-line colors in the chart.
+    QHBoxLayout *toolRow = new QHBoxLayout();
+    toolRow->setSpacing(14);
+
+    // 显示:  (label prefix)
+    QLabel *toolLbl = new QLabel(
+        QString::fromUtf8("\xe6\x98\xbe\xe7\xa4\xba:"), this);  // 显示:
+    toolLbl->setStyleSheet("color: #555; font-weight: bold;");
+    toolRow->addWidget(toolLbl);
+
+    // 指令(位置) trajectory — orange (matches command path)
+    QCheckBox *cbCmd = makeToggle(
+        QString::fromUtf8("\xe6\x8c\x87\xe4\xbb\xa4(\xe4\xbd\x8d\xe7\xbd\xae)"),
+        QColor(0, 160, 150));
+    connect(cbCmd, &QCheckBox::toggled,
+            this, [this](bool on){ m_chart->setCommandVisible(on); });
+    toolRow->addWidget(cbCmd);
+
+    // 反馈 trajectory — blue (matches feedback path)
+    QCheckBox *cbFb = makeToggle(
+        QString::fromUtf8("\xe5\x8f\x8d\xe9\xa6\x88"),
+        QColor(0, 80, 200));
+    connect(cbFb, &QCheckBox::toggled,
+            this, [this](bool on){ m_chart->setFeedbackVisible(on); });
+    toolRow->addWidget(cbFb);
+
+    // Separator
+    QFrame *sep = new QFrame(this);
+    sep->setFrameShape(QFrame::VLine);
+    sep->setStyleSheet("color: #d0d0d0;");
+    toolRow->addWidget(sep);
+
+    // Per-direction size annotation toggles. Dir index matches the chart:
+    // 0=X, 1=Y, 2=对角线1, 3=对角线2. Colors mirror kDirClr in the chart.
+    const QColor dirClr[4] = {
+        QColor(220,  30,  30),   // X  — red
+        QColor(  0, 150,   0),   // Y  — green
+        QColor(240, 140,   0),   // 对角线1 — orange
+        QColor(140,  20, 200),   // 对角线2 — purple
+    };
+    // 尺寸 suffix
+    const QString sizeSfx =
+        QString::fromUtf8(" \xe5\xb0\xba\xe5\xaf\xb8");  // " 尺寸"
+    const QString diag = QString::fromUtf8("\xe5\xaf\xb9\xe8\xa7\x92\xe7\xba\xbf"); // 对角线
+    const QString dirName[4] = {
+        "X" + sizeSfx,
+        "Y" + sizeSfx,
+        diag + "1" + sizeSfx,
+        diag + "2" + sizeSfx,
+    };
+    for (int d = 0; d < 4; ++d) {
+        QCheckBox *cb = makeToggle(dirName[d], dirClr[d]);
+        connect(cb, &QCheckBox::toggled,
+                this, [this, d](bool on){ m_chart->setSizeVisible(d, on); });
+        toolRow->addWidget(cb);
+    }
+
+    toolRow->addStretch(1);
+    root->addLayout(toolRow);
+
     root->addWidget(m_chart, 1);
 
     // ====== Bottom: "no data" placeholder ================================

@@ -130,6 +130,31 @@ void CircularityWidget::setData(const Dataset &data)
 }
 
 // -------------------------------------------------------------------------
+// Visibility toggles
+// -------------------------------------------------------------------------
+
+void CircularityWidget::setCommandVisible(bool on)
+{
+    if (m_showCommand == on) return;
+    m_showCommand = on;
+    update();
+}
+
+void CircularityWidget::setFeedbackVisible(bool on)
+{
+    if (m_showFeedback == on) return;
+    m_showFeedback = on;
+    update();
+}
+
+void CircularityWidget::setSizeVisible(int dir, bool on)
+{
+    if (dir < 0 || dir >= 4 || m_showSize[dir] == on) return;
+    m_showSize[dir] = on;
+    update();
+}
+
+// -------------------------------------------------------------------------
 // View helpers
 // -------------------------------------------------------------------------
 
@@ -225,7 +250,7 @@ void CircularityWidget::drawBackground(QPainter &p)
 
 void CircularityWidget::drawCommandTrajectory(QPainter &p)
 {
-    if (m_cmdx.isEmpty()) return;
+    if (!m_showCommand || m_cmdx.isEmpty()) return;
 
     const int kMaxPts = 8000;
     int step = std::max(1, m_cmdx.size() / kMaxPts);
@@ -236,7 +261,7 @@ void CircularityWidget::drawCommandTrajectory(QPainter &p)
         path.lineTo(toWidget(m_cmdx[i], m_cmdy[i]));
     path.lineTo(toWidget(m_cmdx[0], m_cmdy[0]));
 
-    QPen pen(QColor(220, 100, 0), 1.5, Qt::DashLine);
+    QPen pen(QColor(0, 160, 150), 1.5, Qt::DashLine);
     pen.setDashPattern({6, 4});
     p.setPen(pen);
     p.setBrush(Qt::NoBrush);
@@ -245,7 +270,7 @@ void CircularityWidget::drawCommandTrajectory(QPainter &p)
 
 void CircularityWidget::drawTrajectory(QPainter &p)
 {
-    if (m_fx.isEmpty()) return;
+    if (!m_showFeedback || m_fx.isEmpty()) return;
 
     // Subsample for very large datasets to keep paint fast
     const int kMaxPts = 8000;
@@ -263,12 +288,19 @@ void CircularityWidget::drawTrajectory(QPainter &p)
     p.drawPath(path);
 }
 
+// Blend color 'c' toward white by 'pct' percent (0=original, 100=white).
+static QColor blendWhite(const QColor &c, int pct)
+{
+    int r = c.red()   + (255 - c.red())   * pct / 100;
+    int g = c.green() + (255 - c.green()) * pct / 100;
+    int b = c.blue()  + (255 - c.blue())  * pct / 100;
+    return QColor(r, g, b);
+}
+
 void CircularityWidget::drawSizeBars(QPainter &p)
 {
-    // Draw a caliper-style measurement ruler for each direction.
-    // The ruler runs exactly from projMin to projMax along the direction axis,
-    // so it aligns precisely with the trajectory's actual extent.
     for (int d = 0; d < m_dirs.size(); ++d) {
+        if (d < 4 && !m_showSize[d]) continue;
         const DirExtent &de = m_dirs[d];
         double ca = std::cos(de.angle), sa = std::sin(de.angle);
 
@@ -280,29 +312,23 @@ void CircularityWidget::drawSizeBars(QPainter &p)
         // Perpendicular unit vector (widget space, y-flipped)
         QPointF perp(-sa, -ca);
 
-        // Outer tick length and inner (center line) half-gap
-        const double kTickOuter = 10.0;
-        const double kTickInner =  4.0;
+        // Lightened color for the bar geometry (lines stay subtle)
+        QColor barClr = blendWhite(de.color, 30);
+        const double kTickOuter = 9.0;
 
         p.setBrush(Qt::NoBrush);
 
-        // --- Center measurement line (dashed, spans full extent) ---------
-        QPen dashPen(de.color, 1.5, Qt::DashLine);
-        dashPen.setDashPattern({6, 4});
+        // --- Center measurement line: thin dotted, very light --------------
+        QPen dashPen(barClr, 1.0, Qt::DashLine);
+        dashPen.setDashPattern({4, 5});
         p.setPen(dashPen);
         p.drawLine(wMin, wMax);
 
-        // --- End caps: two-tier tick (outer + inner gap) at each end -----
-        p.setPen(QPen(de.color, 2.0));
-        // Min end
+        // --- Single-tier end caps: thin, same lightened color ---------------
+        QPen tickPen(barClr, 1.2);
+        p.setPen(tickPen);
         p.drawLine(wMin + perp * kTickOuter, wMin - perp * kTickOuter);
-        p.setPen(QPen(de.color, 1.5));
-        p.drawLine(wMin + perp * kTickInner, wMin - perp * kTickInner);
-        // Max end
-        p.setPen(QPen(de.color, 2.0));
         p.drawLine(wMax + perp * kTickOuter, wMax - perp * kTickOuter);
-        p.setPen(QPen(de.color, 1.5));
-        p.drawLine(wMax + perp * kTickInner, wMax - perp * kTickInner);
     }
 }
 
@@ -314,6 +340,7 @@ void CircularityWidget::drawSizeLabels(QPainter &p)
     QRect wr = rect().adjusted(kM, kM, -kM, -kM);
 
     for (int d = 0; d < m_dirs.size(); ++d) {
+        if (d < 4 && !m_showSize[d]) continue;
         const DirExtent &de = m_dirs[d];
         double ca = std::cos(de.angle), sa = std::sin(de.angle);
 
@@ -329,9 +356,20 @@ void CircularityWidget::drawSizeLabels(QPainter &p)
 
         double sizeVal = de.projMax - de.projMin;
         QString txt = QString("%1 mm").arg(sizeVal, 0, 'f', 4);
-        p.setFont(QFont("Arial", 9, QFont::Bold));
-        p.setPen(de.color);
-        p.drawText(QPointF(lx, ly), txt);
+        QFont labelFont("Arial", 8, QFont::Bold);
+        p.setFont(labelFont);
+
+        // Semi-transparent white pill behind the text for legibility
+        QFontMetrics fm(labelFont);
+        QRect textRect = fm.boundingRect(txt);
+        QRectF bg(lx - 2, ly - textRect.height() + 1,
+                  textRect.width() + 6, textRect.height() + 2);
+        QColor bgClr(255, 255, 255, 185);
+        p.fillRect(bg, bgClr);
+
+        // Text in the direction's lightened color (less glaring than full sat)
+        p.setPen(blendWhite(de.color, 20));
+        p.drawText(QPointF(lx + 1, ly), txt);
     }
 }
 
@@ -358,29 +396,38 @@ void CircularityWidget::drawOverlay(QPainter &p)
     p.drawText(plot.adjusted(0, 0, -4, -4),
                Qt::AlignBottom | Qt::AlignRight, hint);
 
-    // Legend — bottom-left
+    // Legend — bottom-left (only list trajectories that are visible)
     {
         int lx = plot.left() + 8;
         int ly = plot.bottom() - 34;
+        int row = 0;
         p.setFont(QFont("Arial", 8, QFont::Bold));
 
-        // Command line sample (orange dashed)
-        QPen cmdPen(QColor(220, 100, 0), 1.5, Qt::DashLine);
-        cmdPen.setDashPattern({6, 4});
-        p.setPen(cmdPen);
-        p.drawLine(lx, ly + 5, lx + 22, ly + 5);
-        p.setPen(QColor(220, 100, 0));
-        // 指令
-        p.drawText(lx + 26, ly + 9,
-            QString::fromUtf8("\xe6\x8c\x87\xe4\xbb\xa4"));
+        if (m_showCommand) {
+            int y = ly + 5 + row * 15;
+            // Command line sample (orange dashed)
+            QPen cmdPen(QColor(0, 160, 150), 1.5, Qt::DashLine);
+            cmdPen.setDashPattern({6, 4});
+            p.setPen(cmdPen);
+            p.drawLine(lx, y, lx + 22, y);
+            p.setPen(QColor(0, 160, 150));
+            // 指令
+            p.drawText(lx + 26, y + 4,
+                QString::fromUtf8("\xe6\x8c\x87\xe4\xbb\xa4"));
+            ++row;
+        }
 
-        // Feedback line sample (blue solid)
-        p.setPen(QPen(QColor(0, 80, 200), 1.5));
-        p.drawLine(lx, ly + 20, lx + 22, ly + 20);
-        p.setPen(QColor(0, 80, 200));
-        // 反馈
-        p.drawText(lx + 26, ly + 24,
-            QString::fromUtf8("\xe5\x8f\x8d\xe9\xa6\x88"));
+        if (m_showFeedback) {
+            int y = ly + 5 + row * 15;
+            // Feedback line sample (blue solid)
+            p.setPen(QPen(QColor(0, 80, 200), 1.5));
+            p.drawLine(lx, y, lx + 22, y);
+            p.setPen(QColor(0, 80, 200));
+            // 反馈
+            p.drawText(lx + 26, y + 4,
+                QString::fromUtf8("\xe5\x8f\x8d\xe9\xa6\x88"));
+            ++row;
+        }
     }
 }
 

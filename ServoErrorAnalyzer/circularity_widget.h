@@ -12,6 +12,12 @@ public:
     explicit CircularityWidget(QWidget *parent = nullptr);
     void setData(const Dataset &data);
 
+    // Visibility toggles (driven by the dialog's checkbox toolbar).
+    void setCommandVisible(bool on);   // 指令(位置)轨迹
+    void setFeedbackVisible(bool on);  // 反馈轨迹
+    // Per-direction size annotation: dir 0=X, 1=Y, 2=对角线1, 3=对角线2
+    void setSizeVisible(int dir, bool on);
+
     // Metric accessors (computed from feedback trajectory)
     bool   hasData()    const { return m_hasData; }
     double roundness()  const { return m_roundness; }
@@ -64,6 +70,11 @@ private:
     };
     QVector<DirExtent> m_dirs;
     bool m_hasData = false;
+
+    // Visibility flags
+    bool m_showCommand  = true;
+    bool m_showFeedback = true;
+    bool m_showSize[4]  = { true, true, true, true };
 
     // View transform
     double m_fitScale = 1.0;  // px/mm at zoom=1 to fit data
