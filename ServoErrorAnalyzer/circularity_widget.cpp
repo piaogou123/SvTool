@@ -348,20 +348,23 @@ void CircularityWidget::drawSizeLabels(QPainter &p)
         QPointF wMax = toWidget(m_cx + de.projMax * ca,
                                 m_cy + de.projMax * sa);
 
-        // Clamp into the plot area so label is always readable
-        double lx = std::max((double)wr.left(),
-                    std::min((double)wr.right()  - 90, wMax.x() + 6));
-        double ly = std::max((double)wr.top()  + 4,
-                    std::min((double)wr.bottom() - 14, wMax.y() - 4));
-
         double sizeVal = de.projMax - de.projMin;
         QString txt = QString("%1 mm").arg(sizeVal, 0, 'f', 4);
         QFont labelFont("Arial", 8, QFont::Bold);
         p.setFont(labelFont);
 
-        // Semi-transparent white pill behind the text for legibility
+        // Measure actual text width so the clamp never cuts off the label
         QFontMetrics fm(labelFont);
         QRect textRect = fm.boundingRect(txt);
+        int txtW = textRect.width();
+
+        // Clamp into the plot area so label is always readable
+        double lx = std::max((double)wr.left(),
+                    std::min((double)wr.right() - txtW - 4, wMax.x() + 6));
+        double ly = std::max((double)wr.top()  + 4,
+                    std::min((double)wr.bottom() - 14, wMax.y() - 4));
+
+        // Semi-transparent white pill behind the text for legibility
         QRectF bg(lx - 2, ly - textRect.height() + 1,
                   textRect.width() + 6, textRect.height() + 2);
         QColor bgClr(255, 255, 255, 185);

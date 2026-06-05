@@ -522,13 +522,18 @@ void ChartView::wheelEvent(QWheelEvent *event)
 
     double factor = (event->angleDelta().y() > 0) ? 0.85 : 1.0 / 0.85;
 
+    // Zoom toward cursor: anchor the data value under the cursor so it stays
+    // in the same widget pixel.  Save old extents first — both endpoints must
+    // be computed from the *original* values, not the already-mutated ones.
     double cx = widgetToTime(event->pos().x());
-    m_viewXMin = cx - (cx - m_viewXMin) * factor;
-    m_viewXMax = m_viewXMin + (m_viewXMax - m_viewXMin) * factor;
+    double oldXMin = m_viewXMin, oldXMax = m_viewXMax;
+    m_viewXMin = cx - (cx - oldXMin) * factor;
+    m_viewXMax = cx + (oldXMax - cx) * factor;
 
     double cy = widgetToValue(event->pos().y());
-    m_viewYMin = cy - (cy - m_viewYMin) * factor;
-    m_viewYMax = m_viewYMin + (m_viewYMax - m_viewYMin) * factor;
+    double oldYMin = m_viewYMin, oldYMax = m_viewYMax;
+    m_viewYMin = cy - (cy - oldYMin) * factor;
+    m_viewYMax = cy + (oldYMax - cy) * factor;
 
     double xMargin = (m_fullXMax - m_fullXMin) * 2;
     double yMargin = (m_fullYMax - m_fullYMin) * 2;
