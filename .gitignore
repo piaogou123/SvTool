@@ -11,3 +11,4 @@ moc_*.cpp
 ServoErrorAnalyzer/_*.png
 ServoErrorAnalyzer/[Rr]elease/
 ServoErrorAnalyzer/release/
+._*

@@ -234,9 +234,19 @@ static void testRealFile(const char *path)
     ChartView cv;
     cv.resize(1000, 600);
     cv.setAxisData(data);
-    cv.grab();
-    cv.setDisplayMode(ChartView::Mode::VelError);
-    cv.grab();
+    QPixmap full = cv.grab();   // 位置误差 + 速度指令/反馈 同屏
+    cv.setShowCmdVel(false);
+    cv.setShowFbVel(false);
+    cv.grab();                  // 仅位置误差
+    cv.setShowCmdVel(true);
+    cv.setShowFbVel(true);
+
+    // TEST_SAVEPNG=1 时导出渲染结果供人工检查
+    if (qEnvironmentVariableIsSet("TEST_SAVEPNG")) {
+        full.save("._chart_render.png");
+        w.grab().save("._circ_render.png");
+        std::printf("png exported: ._chart_render.png ._circ_render.png\n");
+    }
     std::printf("render: ok\n");
 }
 

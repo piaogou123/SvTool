@@ -25,14 +25,14 @@
 #include <cmath>
 
 
-static QLabel *makeAxisResponseLabel(int colorIdx)
+static QLabel *makeAxisResponseLabel(const QColor &color)
 {
     QLabel *lbl = new QLabel(QString::fromUtf8("—"));
     lbl->setTextFormat(Qt::RichText);
     lbl->setStyleSheet(QString(
         "QLabel { background: %1; border-radius: 6px; padding: 10px; "
         "color: #fff; font-size: 12px; }"
-    ).arg(ChartView::axisColor(colorIdx).name()));
+    ).arg(color.name()));
     lbl->setMinimumHeight(150);
     lbl->setWordWrap(true);
     return lbl;
@@ -112,18 +112,30 @@ void MainWindow::setupToolBar()
 
     m_toolBar->addSeparator();
 
-    // 显示模式:位置误差 / 速度误差(文件含速度列时可用)
+    // 曲线类型开关:位置误差 / 速度指令 / 速度反馈(同屏,AKD 示波器式)
     QLabel *modeLbl = new QLabel(QString::fromUtf8(" 显示: "), m_toolBar);
     modeLbl->setStyleSheet("color: #555; font-weight: bold;");
     m_toolBar->addWidget(modeLbl);
 
-    m_modeCombo = new QComboBox(m_toolBar);
-    m_modeCombo->addItem(QString::fromUtf8("位置误差"));
-    m_modeCombo->addItem(QString::fromUtf8("速度误差"));
-    m_modeCombo->setEnabled(false);
-    connect(m_modeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
-            this, &MainWindow::onModeChanged);
-    m_toolBar->addWidget(m_modeCombo);
+    m_chkErr = new QCheckBox(QString::fromUtf8("位置误差"), m_toolBar);
+    m_chkErr->setChecked(true);
+    connect(m_chkErr, &QCheckBox::toggled,
+            this, [this](bool on){ m_chartView->setShowPosError(on); });
+    m_toolBar->addWidget(m_chkErr);
+
+    m_chkCmdVel = new QCheckBox(QString::fromUtf8("速度指令"), m_toolBar);
+    m_chkCmdVel->setChecked(true);
+    m_chkCmdVel->setEnabled(false);
+    connect(m_chkCmdVel, &QCheckBox::toggled,
+            this, [this](bool on){ m_chartView->setShowCmdVel(on); });
+    m_toolBar->addWidget(m_chkCmdVel);
+
+    m_chkFbVel = new QCheckBox(QString::fromUtf8("速度反馈"), m_toolBar);
+    m_chkFbVel->setChecked(true);
+    m_chkFbVel->setEnabled(false);
+    connect(m_chkFbVel, &QCheckBox::toggled,
+            this, [this](bool on){ m_chartView->setShowFbVel(on); });
+    m_toolBar->addWidget(m_chkFbVel);
 
     m_toolBar->addSeparator();
 
@@ -156,7 +168,7 @@ void MainWindow::setupCursorDock()
     // Fixed height breaks the layout-feedback loop that causes value jumping:
     //   setText() → dock resizes → ChartView resizes → plotArea changes →
     //   same mouse pixel maps to different time → different index → setText() again
-    container->setFixedHeight(92);
+    container->setFixedHeight(110);
 
     dock->setWidget(container);
     addDockWidget(Qt::BottomDockWidgetArea, dock);
@@ -227,10 +239,10 @@ void MainWindow::rebuildAxisWidgets(const QStringList &axisNames)
     }
     m_lblResp.clear();
 
-    // Create new widgets per axis
+    // Create new widgets per axis(取该轴位置误差曲线的颜色,与图表一致)
     for (int i = 0; i < axisNames.size(); ++i) {
         const QString &name = axisNames[i];
-        QColor c = ChartView::axisColor(i);
+        QColor c = m_chartView->errColorFor(name);
 
         // Toolbar checkbox
         QCheckBox *cb = new QCheckBox(name, m_chkContainer);
@@ -241,7 +253,7 @@ void MainWindow::rebuildAxisWidgets(const QStringList &axisNames)
         m_chkShow[name] = cb;
 
         // Response label (insert before the stretch)
-        QLabel *lbl = makeAxisResponseLabel(i);
+        QLabel *lbl = makeAxisResponseLabel(c);
         m_respLayout->insertWidget(m_respLayout->count() - 1, lbl); // before stretch
         m_lblResp[name] = lbl;
     }
@@ -309,33 +321,44 @@ void MainWindow::onFileDropped(const QString &path)
     loadFile(path);
 }
 
-QString MainWindow::unitFor(const QString &axis) const
+void MainWindow::onCursorMoved(double time, int idx)
 {
-    const bool deg = (axis == "C" || axis == "A");
-    if (m_modeCombo->currentIndex() == 1)   // 速度误差
-        return deg ? QString::fromUtf8("deg/min") : QString::fromUtf8("mm/min");
-    return deg ? QString::fromUtf8("deg") : QString::fromUtf8("mm");
-}
+    if (idx < 0 || idx >= m_curData.size()) return;
 
-void MainWindow::onCursorMoved(double time, int idx,
-                               const QMap<QString, double> &values)
-{
-    // Bottom panel: error values — dynamic table
+    // 底部面板:按轴一行,列出位置误差 / 速度指令 / 速度反馈
     QString text = QString::fromUtf8(
-        "<table><tr><td><b>时间:</b></td>"
-        "<td>%1 s</td></tr>").arg(time, 0, 'f', 6);
+        "<table cellspacing=2>"
+        "<tr><td><b>时间:</b></td><td colspan=3>%1 ms</td></tr>"
+        "<tr><td></td>"
+        "<td><b style='color:#666'>位置误差</b></td>"
+        "<td><b style='color:#666'>速度指令</b></td>"
+        "<td><b style='color:#666'>速度反馈</b></td></tr>")
+        .arg(time * 1000.0, 0, 'f', 3);
 
-    for (auto it = values.begin(); it != values.end(); ++it) {
-        const QString &name = it.key();
-        double v = it.value();
-        QColor c = m_chartView->isSeriesVisible(name)
-                       ? ChartView::axisColor(m_curData.axisOrder.indexOf(name))
-                       : QColor(128, 128, 128);
-        text += QString::fromUtf8(
-            "<tr><td><b style='color:%1'>%2 误差:</b></td>"
-            "<td>%3 %4</td></tr>")
-                    .arg(c.name()).arg(name)
-                    .arg(v, 0, 'f', 6).arg(unitFor(name));
+    for (const QString &name : m_curData.axisOrder) {
+        const AxisChannel &ch = m_curData.axes[name];
+        const bool deg = (name == "C" || name == "A");
+        const QString posUnit = deg ? "deg" : "mm";
+        const QString velUnit = deg ? "deg/min" : "mm/min";
+
+        const QColor c = m_chartView->isSeriesVisible(name)
+                             ? m_chartView->errColorFor(name)
+                             : QColor(128, 128, 128);
+        QString row = QString::fromUtf8(
+            "<tr><td><b style='color:%1'>%2 轴</b></td>"
+            "<td>%3 %4</td>")
+                          .arg(c.name()).arg(name)
+                          .arg(ch.err[idx], 0, 'f', 6).arg(posUnit);
+        if (ch.hasVelocity()) {
+            row += QString::fromUtf8("<td>%1 %3</td><td>%2 %3</td>")
+                       .arg(ch.cmdVel[idx], 0, 'f', 1)
+                       .arg(ch.fbVel[idx], 0, 'f', 1)
+                       .arg(velUnit);
+        } else {
+            row += QString::fromUtf8("<td>—</td><td>—</td>");
+        }
+        row += "</tr>";
+        text += row;
     }
     text += "</table>";
     m_lblCursor->setText(text);
@@ -360,12 +383,6 @@ void MainWindow::onVisibilityChanged()
     m_chartView->setSeriesVisible(axis, cb->isChecked());
 }
 
-void MainWindow::onModeChanged(int index)
-{
-    m_chartView->setDisplayMode(index == 1 ? ChartView::Mode::VelError
-                                           : ChartView::Mode::PosError);
-}
-
 void MainWindow::loadFile(const QString &filePath)
 {
     Dataset data;
@@ -377,18 +394,15 @@ void MainWindow::loadFile(const QString &filePath)
     }
 
     m_curData = data;
+    // 先交给图表分配曲线颜色,rebuildAxisWidgets 取色时才一致
+    m_chartView->setAxisData(data);
     rebuildAxisWidgets(data.axisOrder);
     rebuildStatsHtml();
 
-    // 速度误差模式仅在文件含速度列时可用
-    bool hasVel = false;
-    for (const auto &name : data.axisOrder)
-        if (data.axes[name].hasVelocity()) { hasVel = true; break; }
-    if (!hasVel)
-        m_modeCombo->setCurrentIndex(0);
-    m_modeCombo->setEnabled(hasVel);
-
-    m_chartView->setAxisData(data);
+    // 速度曲线开关仅在文件含速度列时可用
+    const bool hasVel = m_chartView->dataHasVelocity();
+    m_chkCmdVel->setEnabled(hasVel);
+    m_chkFbVel->setEnabled(hasVel);
 
     m_dirAct->setEnabled(true);
     if (m_dirDialog && m_dirDialog->isVisible())
@@ -430,23 +444,23 @@ void MainWindow::updateResponseAt(int idx)
         if (noResp) {
             html += QString::fromUtf8(
                 "<table style='font-size:12px;' cellspacing=1>"
-                "<tr><td>起始时间</td><td align=right><b>%1 s</b></td></tr>"
+                "<tr><td>起始时间</td><td align=right><b>%1 ms</b></td></tr>"
                 "<tr><td>起始位置</td><td align=right>%2</td></tr>"
                 "<tr><td>响应延迟</td><td align=right><b>—(未到达)</b></td></tr>"
                 "</table>")
-                .arg(t0, 0, 'f', 6)
+                .arg(t0 * 1000.0, 0, 'f', 3)
                 .arg(ch.cmd[idx], 0, 'f', 6);
         } else {
             html += QString::fromUtf8(
                 "<table style='font-size:12px;' cellspacing=1>"
-                "<tr><td>起始时间</td><td align=right><b>%1 s</b></td></tr>"
-                "<tr><td>结束时间</td><td align=right><b>%2 s</b></td></tr>"
+                "<tr><td>起始时间</td><td align=right><b>%1 ms</b></td></tr>"
+                "<tr><td>结束时间</td><td align=right><b>%2 ms</b></td></tr>"
                 "<tr><td>起始位置</td><td align=right>%3</td></tr>"
                 "<tr><td>到达位置</td><td align=right>%4</td></tr>"
                 "<tr><td>响应延迟</td><td align=right><b>%5</b></td></tr>"
                 "</table>")
-                .arg(t0, 0, 'f', 6)
-                .arg(m_curData.time[j], 0, 'f', 6)
+                .arg(t0 * 1000.0, 0, 'f', 3)
+                .arg(m_curData.time[j] * 1000.0, 0, 'f', 3)
                 .arg(ch.cmd[idx], 0, 'f', 6)
                 .arg(ch.fb[j], 0, 'f', 6)
                 .arg(fmtMs(resp));

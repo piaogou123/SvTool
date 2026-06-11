@@ -11,14 +11,17 @@
 
 // --- helpers -----------------------------------------------------------
 
-static QString formatDouble(double v, int prec)
+// 刻度标签:固定显示 3 位小数;放大后刻度步长小于 0.001 时
+// 自动增加小数位,保证相邻刻度值始终可区分
+static QString formatTick(double v, double step)
 {
-    QString s = QString::number(v, 'f', prec);
-    if (s.contains('.')) {
-        while (s.endsWith('0')) s.chop(1);
-        if (s.endsWith('.')) s.chop(1);
+    int dec = 3;
+    if (step > 0) {
+        const int need =
+            static_cast<int>(std::ceil(-std::log10(step)));
+        if (need > dec) dec = need;
     }
-    return s;
+    return QString::number(v, 'f', dec);
 }
 
 static double niceStep(double approx)
@@ -54,11 +57,11 @@ void ChartView::calcTicks(double vMin, double vMax, int maxTicks,
     if (count > maxTicks * 2) count = maxTicks * 2;
 }
 
-// 12 色调色板 — 前 3 色为约定的 X/Y/C 颜色
+// 12 色调色板 — 单轴文件依次取 红/绿/蓝,与 AKD 示波器配色一致
 static const QColor kPalette[] = {
-    QColor(220, 30, 30),     // X — red
-    QColor(0, 150, 0),       // Y — green
-    QColor(0, 100, 255),     // C — blue
+    QColor(220, 30, 30),     // red
+    QColor(0, 150, 0),       // green
+    QColor(0, 100, 255),     // blue
     QColor(240, 140, 0),     // orange
     QColor(140, 20, 200),    // purple
     QColor(0, 160, 160),     // teal
@@ -74,6 +77,28 @@ static constexpr int kPaletteSize = sizeof(kPalette) / sizeof(kPalette[0]);
 QColor ChartView::axisColor(int idx)
 {
     return kPalette[idx % kPaletteSize];
+}
+
+static QString seriesKey(const QString &axis, int type)
+{
+    return axis + QLatin1Char(':') + QString::number(type);
+}
+
+// 曲线图例文本:轴名 + 类型 + 单位
+static QString seriesLabel(const QString &axis, int type)
+{
+    const bool deg = (axis == "C" || axis == "A");
+    switch (type) {
+    case ChartView::kErr:
+        return axis + QString::fromUtf8(" 位置误差 [%1]")
+                          .arg(deg ? "deg" : "mm");
+    case ChartView::kCmdVel:
+        return axis + QString::fromUtf8(" 速度指令 [%1]")
+                          .arg(deg ? "deg/min" : "mm/min");
+    default:
+        return axis + QString::fromUtf8(" 速度反馈 [%1]")
+                          .arg(deg ? "deg/min" : "mm/min");
+    }
 }
 
 // --- ChartView ---------------------------------------------------------
@@ -96,37 +121,86 @@ ChartView::ChartView(QWidget *parent)
 void ChartView::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
-    double w = width();
-    double h = height();
-    m_plotArea = QRectF(ML, MT, w - ML - MR, h - MT - MB);
+    updatePlotArea();
     invalidateStaticCache();
+}
+
+// --- series enumeration -------------------------------------------------
+
+bool ChartView::dataHasVelocity() const
+{
+    for (const auto &name : m_axisNames) {
+        auto it = m_data.axes.constFind(name);
+        if (it != m_data.axes.constEnd() && it->hasVelocity())
+            return true;
+    }
+    return false;
+}
+
+QColor ChartView::errColorFor(const QString &axis) const
+{
+    return m_seriesColor.value(seriesKey(axis, kErr), QColor(Qt::black));
+}
+
+QVector<ChartView::SeriesRef> ChartView::visibleSeries() const
+{
+    QVector<SeriesRef> out;
+    for (const QString &name : m_axisNames) {
+        if (!m_visible.value(name, true)) continue;
+        auto it = m_data.axes.constFind(name);
+        if (it == m_data.axes.constEnd()) continue;
+        // 注意:必须取 map 节点的稳定引用,SeriesRef 存其数据指针
+        const AxisChannel &ch = it.value();
+
+        if (m_showErr && !ch.err.isEmpty()) {
+            out.append({ name, kErr, &ch.err,
+                         m_seriesColor.value(seriesKey(name, kErr)),
+                         seriesLabel(name, kErr), false });
+        }
+        if (ch.hasVelocity()) {
+            if (m_showCmdVel) {
+                out.append({ name, kCmdVel, &ch.cmdVel,
+                             m_seriesColor.value(seriesKey(name, kCmdVel)),
+                             seriesLabel(name, kCmdVel), true });
+            }
+            if (m_showFbVel) {
+                out.append({ name, kFbVel, &ch.fbVel,
+                             m_seriesColor.value(seriesKey(name, kFbVel)),
+                             seriesLabel(name, kFbVel), true });
+            }
+        }
+    }
+    return out;
 }
 
 // --- coordinate transforms --------------------------------------------
 
-QPointF ChartView::dataToWidget(double t, double v) const
+double ChartView::xToPx(double t) const
 {
     double rx = m_viewXMax - m_viewXMin;
-    double ry = m_viewYMax - m_viewYMin;
     if (rx == 0) rx = 1;
-    if (ry == 0) ry = 1;
-    double x = m_plotArea.left() + (t - m_viewXMin) / rx * m_plotArea.width();
-    double y = m_plotArea.bottom() - (v - m_viewYMin) / ry * m_plotArea.height();
-    return QPointF(x, y);
+    return m_plotArea.left() + (t - m_viewXMin) / rx * m_plotArea.width();
 }
 
-double ChartView::widgetToTime(double wx) const
+double ChartView::posToPx(double v) const
+{
+    double ry = m_viewPosMax - m_viewPosMin;
+    if (ry == 0) ry = 1;
+    return m_plotArea.bottom() - (v - m_viewPosMin) / ry * m_plotArea.height();
+}
+
+double ChartView::velToPx(double v) const
+{
+    double ry = m_viewVelMax - m_viewVelMin;
+    if (ry == 0) ry = 1;
+    return m_plotArea.bottom() - (v - m_viewVelMin) / ry * m_plotArea.height();
+}
+
+double ChartView::pxToTime(double wx) const
 {
     double rx = m_viewXMax - m_viewXMin;
     if (rx == 0) rx = 1;
     return m_viewXMin + (wx - m_plotArea.left()) / m_plotArea.width() * rx;
-}
-
-double ChartView::widgetToValue(double wy) const
-{
-    double ry = m_viewYMax - m_viewYMin;
-    if (ry == 0) ry = 1;
-    return m_viewYMax - (wy - m_plotArea.top()) / m_plotArea.height() * ry;
 }
 
 int ChartView::nearestIndex(double time) const
@@ -142,18 +216,6 @@ int ChartView::nearestIndex(double time) const
     return idx;
 }
 
-// --- mode/series helpers ------------------------------------------------
-
-bool ChartView::axisAvailable(const AxisChannel &ch) const
-{
-    return m_mode == Mode::PosError || ch.hasVelocity();
-}
-
-const QVector<double> &ChartView::seriesFor(const AxisChannel &ch) const
-{
-    return m_mode == Mode::PosError ? ch.err : ch.velErr;
-}
-
 // --- public API --------------------------------------------------------
 
 void ChartView::setAxisData(const Dataset &data)
@@ -165,34 +227,23 @@ void ChartView::setAxisData(const Dataset &data)
 
     m_axisNames = data.axisOrder;
 
-    // Assign colours
-    m_color.clear();
+    // 按存在的曲线顺序分配颜色(轴优先):
+    // 单轴含速度 → 位置误差红 / 速度指令绿 / 速度反馈蓝(同 AKD)
+    m_seriesColor.clear();
     m_visible.clear();
-    for (int i = 0; i < m_axisNames.size(); ++i) {
-        const QString &name = m_axisNames[i];
-        m_color[name] = axisColor(i);
+    int colorIdx = 0;
+    for (const QString &name : m_axisNames) {
         m_visible[name] = true;
-    }
-
-    // 新文件没有速度数据时,速度模式自动退回位置误差
-    if (m_mode == Mode::VelError) {
-        bool anyVel = false;
-        for (const auto &name : m_axisNames)
-            if (m_data.axes[name].hasVelocity()) { anyVel = true; break; }
-        if (!anyVel) m_mode = Mode::PosError;
+        const AxisChannel &ch = m_data.axes[name];
+        m_seriesColor[seriesKey(name, kErr)] = axisColor(colorIdx++);
+        if (ch.hasVelocity()) {
+            m_seriesColor[seriesKey(name, kCmdVel)] = axisColor(colorIdx++);
+            m_seriesColor[seriesKey(name, kFbVel)]  = axisColor(colorIdx++);
+        }
     }
 
     computeFullRange();
-    zoomReset();
-}
-
-void ChartView::setDisplayMode(Mode mode)
-{
-    if (mode == m_mode) return;
-    m_mode = mode;
-    m_cursorIdx = -1;
-    m_lastEmittedCursorIdx = -1;
-    computeFullRange();
+    updatePlotArea();
     zoomReset();
 }
 
@@ -200,22 +251,35 @@ void ChartView::computeFullRange()
 {
     if (m_data.isEmpty()) {
         m_fullXMin = 0; m_fullXMax = 1;
-        m_fullYMin = -1; m_fullYMax = 1;
+        m_fullPosMin = -1; m_fullPosMax = 1;
+        m_fullVelMin = -1; m_fullVelMax = 1;
     } else {
         m_fullXMin = m_data.time.first();
         m_fullXMax = m_data.time.last();
 
-        bool first = true;
-        m_fullYMin = -1; m_fullYMax = 1;
+        // 位置/速度范围跟随可见轴(与类型开关无关,保持坐标轴稳定)
+        bool firstPos = true, firstVel = true;
+        m_fullPosMin = -1; m_fullPosMax = 1;
+        m_fullVelMin = -1; m_fullVelMax = 1;
         for (const auto &name : m_axisNames) {
             if (!m_visible.value(name, true)) continue;
             const AxisChannel &ch = m_data.axes[name];
-            if (!axisAvailable(ch)) continue;
-            for (double v : seriesFor(ch)) {
-                if (first) { m_fullYMin = m_fullYMax = v; first = false; }
+            for (double v : ch.err) {
+                if (firstPos) { m_fullPosMin = m_fullPosMax = v; firstPos = false; }
                 else {
-                    if (v < m_fullYMin) m_fullYMin = v;
-                    if (v > m_fullYMax) m_fullYMax = v;
+                    if (v < m_fullPosMin) m_fullPosMin = v;
+                    if (v > m_fullPosMax) m_fullPosMax = v;
+                }
+            }
+            if (ch.hasVelocity()) {
+                for (const QVector<double> *vec : { &ch.cmdVel, &ch.fbVel }) {
+                    for (double v : *vec) {
+                        if (firstVel) { m_fullVelMin = m_fullVelMax = v; firstVel = false; }
+                        else {
+                            if (v < m_fullVelMin) m_fullVelMin = v;
+                            if (v > m_fullVelMax) m_fullVelMax = v;
+                        }
+                    }
                 }
             }
         }
@@ -223,13 +287,43 @@ void ChartView::computeFullRange()
 
     double xPad = (m_fullXMax - m_fullXMin) * 0.02;
     if (xPad == 0) xPad = 0.01;
-    double yPad = (m_fullYMax - m_fullYMin) * 0.08;
-    if (yPad == 0) yPad = 0.001;
-
     m_fullXMin -= xPad;
     m_fullXMax += xPad;
-    m_fullYMin -= yPad;
-    m_fullYMax += yPad;
+
+    double posPad = (m_fullPosMax - m_fullPosMin) * 0.08;
+    if (posPad == 0) posPad = 0.001;
+    m_fullPosMin -= posPad;
+    m_fullPosMax += posPad;
+
+    double velPad = (m_fullVelMax - m_fullVelMin) * 0.08;
+    if (velPad == 0) velPad = 0.001;
+    m_fullVelMin -= velPad;
+    m_fullVelMax += velPad;
+}
+
+void ChartView::updatePlotArea()
+{
+    const int ml = dataHasVelocity() ? kMLDual : kMLPosOnly;
+
+    // 图例流式布局行数(与 drawLegend 的排布逻辑一致)
+    QFont f = font();
+    f.setPixelSize(11);
+    const QFontMetrics fm(f);
+    const double availW = width() - ml - MR;
+    int rows = 1;
+    double x = 0;
+    const auto series = visibleSeries();
+    for (const SeriesRef &s : series) {
+        const double entryW = 22 + fm.horizontalAdvance(s.label) + 18;
+        if (x > 0 && x + entryW > availW) { ++rows; x = 0; }
+        x += entryW;
+    }
+    if (series.isEmpty()) rows = 1;
+    m_legendRows = rows;
+
+    const double top = 8 + rows * 18 + 4;
+    m_plotArea = QRectF(ml, top,
+                        width() - ml - MR, height() - top - MB);
 }
 
 void ChartView::setSeriesVisible(const QString &axis, bool visible)
@@ -239,6 +333,7 @@ void ChartView::setSeriesVisible(const QString &axis, bool visible)
 
     // 范围跟随可见轴;若用户已手动缩放则保留当前视野
     computeFullRange();
+    updatePlotArea();
     if (!m_userZoomed) {
         zoomReset();
     } else {
@@ -252,12 +347,41 @@ bool ChartView::isSeriesVisible(const QString &axis) const
     return m_visible.value(axis, false);
 }
 
+void ChartView::setShowPosError(bool on)
+{
+    if (m_showErr == on) return;
+    m_showErr = on;
+    updatePlotArea();
+    invalidateStaticCache();
+    update();
+}
+
+void ChartView::setShowCmdVel(bool on)
+{
+    if (m_showCmdVel == on) return;
+    m_showCmdVel = on;
+    updatePlotArea();
+    invalidateStaticCache();
+    update();
+}
+
+void ChartView::setShowFbVel(bool on)
+{
+    if (m_showFbVel == on) return;
+    m_showFbVel = on;
+    updatePlotArea();
+    invalidateStaticCache();
+    update();
+}
+
 void ChartView::zoomReset()
 {
     m_viewXMin = m_fullXMin;
     m_viewXMax = m_fullXMax;
-    m_viewYMin = m_fullYMin;
-    m_viewYMax = m_fullYMax;
+    m_viewPosMin = m_fullPosMin;
+    m_viewPosMax = m_fullPosMax;
+    m_viewVelMin = m_fullVelMin;
+    m_viewVelMax = m_fullVelMax;
     m_userZoomed = false;
     invalidateStaticCache();
     update();
@@ -293,6 +417,7 @@ void ChartView::drawStaticContent(QPainter &p)
     p.fillRect(rect(), m_bgColor);
     p.fillRect(m_plotArea, Qt::white);
 
+    drawLegend(p);
     drawGrid(p);
     drawCurves(p);
 }
@@ -302,33 +427,72 @@ void ChartView::invalidateStaticCache()
     m_staticCacheDirty = true;
 }
 
+// 顶部横排图例(AKD 风格):线样 + 文本,超宽自动换行
+void ChartView::drawLegend(QPainter &p)
+{
+    const auto series = visibleSeries();
+    if (series.isEmpty()) return;
+
+    p.save();
+    p.setRenderHint(QPainter::Antialiasing, false);
+    QFont f = p.font();
+    f.setPixelSize(11);
+    p.setFont(f);
+    const QFontMetrics fm(f);
+
+    const double availW = m_plotArea.width();
+    double x = m_plotArea.left();
+    double y = 8;
+    for (const SeriesRef &s : series) {
+        const double entryW = 22 + fm.horizontalAdvance(s.label) + 18;
+        if (x > m_plotArea.left() && x + entryW > m_plotArea.left() + availW) {
+            x = m_plotArea.left();
+            y += 18;
+        }
+        p.setPen(QPen(s.color, 2));
+        p.drawLine(QPointF(x, y + 7), QPointF(x + 18, y + 7));
+        p.setPen(Qt::black);
+        p.drawText(QPointF(x + 22, y + 12), s.label);
+        x += entryW;
+    }
+    p.restore();
+}
+
 void ChartView::drawGrid(QPainter &p)
 {
     p.save();
-    p.setClipRect(m_plotArea);
+
+    const bool dual = dataHasVelocity();
+    const double ml = m_plotArea.left();
 
     QPen pen(m_gridColor, 1);
-    p.setPen(pen);
     QFont font = p.font();
     font.setPixelSize(10);
     p.setFont(font);
 
-    // X ticks
+    // --- X 轴刻度(底部,毫秒显示)----------------------------------------
     {
+        // 刻度按毫秒栅格计算,数据时间(秒)换算后显示
         double first, step; int count;
-        calcTicks(m_viewXMin, m_viewXMax, 8, first, step, count);
+        calcTicks(m_viewXMin * 1000.0, m_viewXMax * 1000.0, 8,
+                  first, step, count);
 
         for (int i = 0; i < count; ++i) {
-            double val = first + i * step;
+            double valMs = first + i * step;
+            double val = valMs / 1000.0;
             if (val < m_viewXMin || val > m_viewXMax) continue;
-            QPointF pt = dataToWidget(val, 0);
-            p.drawLine(QPointF(pt.x(), m_plotArea.top()),
-                       QPointF(pt.x(), m_plotArea.bottom()));
-            QString label = formatDouble(val, 3);
-            QRectF labelRect(pt.x() - 30, m_plotArea.bottom() + 2, 60, 16);
-            p.setPen(Qt::black);
-            p.drawText(labelRect, Qt::AlignHCenter | Qt::AlignTop, label);
+            const double x = xToPx(val);
+            // 网格线裁剪在绘图区内;数字标签画在绘图区下方,不裁剪
+            p.save();
+            p.setClipRect(m_plotArea);
             p.setPen(pen);
+            p.drawLine(QPointF(x, m_plotArea.top()),
+                       QPointF(x, m_plotArea.bottom()));
+            p.restore();
+            p.setPen(Qt::black);
+            QRectF labelRect(x - 40, m_plotArea.bottom() + 2, 80, 16);
+            p.drawText(labelRect, Qt::AlignHCenter | Qt::AlignTop,
+                       formatTick(valMs, step));
         }
 
         QRectF xLabel(m_plotArea.left(), m_plotArea.bottom() + 22,
@@ -336,28 +500,67 @@ void ChartView::drawGrid(QPainter &p)
         p.setPen(Qt::black);
         font.setPixelSize(11);
         p.setFont(font);
-        p.drawText(xLabel, Qt::AlignHCenter, QString::fromUtf8("时间 (s)"));
+        p.drawText(xLabel, Qt::AlignHCenter, QString::fromUtf8("时间 [ms]"));
         font.setPixelSize(10);
         p.setFont(font);
     }
 
-    // Y ticks
+    // --- 位置误差轴(内侧):横向网格线 + 蓝色刻度值 -----------------------
     {
         double first, step; int count;
-        calcTicks(m_viewYMin, m_viewYMax, 7, first, step, count);
+        calcTicks(m_viewPosMin, m_viewPosMax, 7, first, step, count);
 
-        p.setPen(pen);
+        const QColor posLabelClr(30, 70, 180);
         for (int i = 0; i < count; ++i) {
             double val = first + i * step;
-            if (val < m_viewYMin || val > m_viewYMax) continue;
-            QPointF pt = dataToWidget(0, val);
-            p.drawLine(QPointF(m_plotArea.left(), pt.y()),
-                       QPointF(m_plotArea.right(), pt.y()));
-            QString label = formatDouble(val, 4);
-            QRectF labelRect(m_plotArea.left() - 66, pt.y() - 8, 62, 16);
-            p.setPen(Qt::black);
-            p.drawText(labelRect, Qt::AlignRight | Qt::AlignVCenter, label);
+            if (val < m_viewPosMin || val > m_viewPosMax) continue;
+            const double y = posToPx(val);
             p.setPen(pen);
+            p.save();
+            p.setClipRect(m_plotArea);
+            p.drawLine(QPointF(m_plotArea.left(), y),
+                       QPointF(m_plotArea.right(), y));
+            p.restore();
+            p.setPen(posLabelClr);
+            QRectF labelRect(ml - 60, y - 8, 56, 16);
+            p.drawText(labelRect, Qt::AlignRight | Qt::AlignVCenter,
+                       formatTick(val, step));
+        }
+
+        // 轴标题(竖排)
+        p.setPen(posLabelClr);
+        font.setPixelSize(11);
+        p.setFont(font);
+        p.save();
+        p.translate(ml - 62, m_plotArea.center().y());
+        p.rotate(-90);
+        p.drawText(QRectF(-60, -10, 120, 20), Qt::AlignCenter,
+                   QString::fromUtf8("位置误差 [mm]"));
+        p.restore();
+        font.setPixelSize(10);
+        p.setFont(font);
+    }
+
+    // --- 速度轴(外侧,仅当数据含速度列)-----------------------------------
+    if (dual) {
+        const double axisX = ml - 82;   // 速度轴竖线位置
+        p.setPen(QPen(QColor(120, 120, 120), 1));
+        p.drawLine(QPointF(axisX, m_plotArea.top()),
+                   QPointF(axisX, m_plotArea.bottom()));
+
+        double first, step; int count;
+        calcTicks(m_viewVelMin, m_viewVelMax, 7, first, step, count);
+
+        for (int i = 0; i < count; ++i) {
+            double val = first + i * step;
+            if (val < m_viewVelMin || val > m_viewVelMax) continue;
+            const double y = velToPx(val);
+            p.setPen(QPen(QColor(120, 120, 120), 1));
+            p.drawLine(QPointF(axisX - 3, y), QPointF(axisX + 3, y));
+            p.setPen(Qt::black);
+            QRectF labelRect(axisX - 70, y - 8, 64, 16);
+            p.drawText(labelRect, Qt::AlignRight | Qt::AlignVCenter,
+                       formatTick(val, step));
         }
 
         p.setPen(Qt::black);
@@ -366,11 +569,11 @@ void ChartView::drawGrid(QPainter &p)
         p.save();
         p.translate(12, m_plotArea.center().y());
         p.rotate(-90);
-        p.drawText(QRectF(-60, -10, 120, 20), Qt::AlignCenter,
-                   m_mode == Mode::PosError
-                       ? QString::fromUtf8("位置误差")
-                       : QString::fromUtf8("速度误差"));
+        p.drawText(QRectF(-70, -10, 140, 20), Qt::AlignCenter,
+                   QString::fromUtf8("速度 [mm/min]"));
         p.restore();
+        font.setPixelSize(10);
+        p.setFont(font);
     }
 
     // Plot area border
@@ -399,20 +602,16 @@ void ChartView::drawCurves(QPainter &p)
     int visCount = iEnd - iBeg;
     if (visCount <= 0) { p.restore(); return; }
 
-    for (const QString &name : m_axisNames) {
-        if (!m_visible.value(name, true)) continue;
-        const AxisChannel &ch = m_data.axes[name];
-        if (!axisAvailable(ch)) continue;
-        const QVector<double> &series = seriesFor(ch);
-
-        QPen pen(m_color[name], 1);
-        p.setPen(pen);
+    for (const SeriesRef &s : visibleSeries()) {
+        p.setPen(QPen(s.color, 1));
 
         QPolygonF poly;
         poly.reserve(visCount);
-
-        for (int i = iBeg; i < iEnd; ++i)
-            poly.append(dataToWidget(t[i], series[i]));
+        for (int i = iBeg; i < iEnd; ++i) {
+            const double v = (*s.data)[i];
+            poly.append(QPointF(xToPx(t[i]),
+                                s.velScale ? velToPx(v) : posToPx(v)));
+        }
 
         if (poly.size() >= 2)
             p.drawPolyline(poly);
@@ -420,31 +619,6 @@ void ChartView::drawCurves(QPainter &p)
             p.drawPoint(poly[0]);
     }
 
-    p.restore();
-
-    // Legend — dynamic height
-    p.save();
-    p.setRenderHint(QPainter::Antialiasing, false);
-    QFont f = p.font();
-    f.setPixelSize(12);
-    p.setFont(f);
-    const QString suffix = m_mode == Mode::PosError
-        ? QString::fromUtf8(" 误差")
-        : QString::fromUtf8(" 速度误差");
-    double lx = m_plotArea.right() - 170;
-    double ly = m_plotArea.top() + 5;
-    for (const QString &name : m_axisNames) {
-        const AxisChannel &ch = m_data.axes[name];
-        if (!axisAvailable(ch)) continue;
-        QColor c = m_color[name];
-        p.setPen(c);
-        p.setBrush(c);
-        p.drawRect(QRectF(lx, ly, 16, 3));
-        p.setPen(Qt::black);
-        p.drawText(QRectF(lx + 20, ly - 7, 130, 16), Qt::AlignLeft,
-                   name + suffix);
-        ly += 18;
-    }
     p.restore();
 }
 
@@ -457,27 +631,18 @@ void ChartView::drawCursor(QPainter &p)
     p.save();
     p.setClipRect(m_plotArea);
 
-    double t = m_data.time[m_cursorIdx];
-    double yTop = m_viewYMax;
-    double yBot = m_viewYMin;
-
-    QPointF top = dataToWidget(t, yTop);
-    QPointF bot = dataToWidget(t, yBot);
+    const double t = m_data.time[m_cursorIdx];
+    const double x = xToPx(t);
 
     QPen linePen(QColor(100, 100, 100), 1, Qt::DashLine);
     p.setPen(linePen);
-    p.drawLine(top, bot);
+    p.drawLine(QPointF(x, m_plotArea.top()), QPointF(x, m_plotArea.bottom()));
 
-    for (const QString &name : m_axisNames) {
-        if (!m_visible.value(name, true)) continue;
-        const AxisChannel &ch = m_data.axes[name];
-        if (!axisAvailable(ch)) continue;
-        double v = seriesFor(ch)[m_cursorIdx];
-        QPointF pt = dataToWidget(t, v);
-
-        QColor c = m_color[name];
-        p.setPen(QPen(c.darker(150), 2));
-        p.setBrush(c);
+    for (const SeriesRef &s : visibleSeries()) {
+        const double v = (*s.data)[m_cursorIdx];
+        QPointF pt(x, s.velScale ? velToPx(v) : posToPx(v));
+        p.setPen(QPen(s.color.darker(150), 2));
+        p.setBrush(s.color);
         p.drawEllipse(pt, 3, 3);
     }
 
@@ -524,18 +689,11 @@ void ChartView::mouseMoveEvent(QMouseEvent *event)
     }
 
     m_cursorVisible = true;
-    double t = widgetToTime(event->pos().x());
+    double t = pxToTime(event->pos().x());
     m_cursorIdx = nearestIndex(t);
 
     if (m_cursorIdx != m_lastEmittedCursorIdx) {
-        QMap<QString, double> values;
-        for (const QString &name : m_axisNames) {
-            const AxisChannel &ch = m_data.axes[name];
-            if (!axisAvailable(ch)) continue;
-            values[name] = seriesFor(ch)[m_cursorIdx];
-        }
-
-        emit cursorMoved(m_data.time[m_cursorIdx], m_cursorIdx, values);
+        emit cursorMoved(m_data.time[m_cursorIdx], m_cursorIdx);
         m_lastEmittedCursorIdx = m_cursorIdx;
     }
 
@@ -567,15 +725,26 @@ void ChartView::mouseReleaseEvent(QMouseEvent *event)
         r = r.intersected(m_plotArea.toRect());
 
         if (r.width() > 10 && r.height() > 10) {
-            double x1 = widgetToTime(r.left());
-            double x2 = widgetToTime(r.right());
-            double y1 = widgetToValue(r.bottom());
-            double y2 = widgetToValue(r.top());
-
+            const double x1 = pxToTime(r.left());
+            const double x2 = pxToTime(r.right());
             m_viewXMin = std::min(x1, x2);
             m_viewXMax = std::max(x1, x2);
-            m_viewYMin = std::min(y1, y2);
-            m_viewYMax = std::max(y1, y2);
+
+            // 双 Y 轴:按选框在绘图区的高度比例同步缩放两个纵轴
+            const double h = m_plotArea.height();
+            const double fTop = (r.top() - m_plotArea.top()) / h;
+            const double fBot = (r.bottom() - m_plotArea.top()) / h;
+
+            const double posRange = m_viewPosMax - m_viewPosMin;
+            const double posMaxOld = m_viewPosMax;
+            m_viewPosMax = posMaxOld - fTop * posRange;
+            m_viewPosMin = posMaxOld - fBot * posRange;
+
+            const double velRange = m_viewVelMax - m_viewVelMin;
+            const double velMaxOld = m_viewVelMax;
+            m_viewVelMax = velMaxOld - fTop * velRange;
+            m_viewVelMin = velMaxOld - fBot * velRange;
+
             m_userZoomed = true;
             invalidateStaticCache();
         }
@@ -595,22 +764,38 @@ void ChartView::wheelEvent(QWheelEvent *event)
     // Zoom toward cursor: anchor the data value under the cursor so it stays
     // in the same widget pixel.  Save old extents first — both endpoints must
     // be computed from the *original* values, not the already-mutated ones.
-    double cx = widgetToTime(pos.x());
+    double cx = pxToTime(pos.x());
     double oldXMin = m_viewXMin, oldXMax = m_viewXMax;
     m_viewXMin = cx - (cx - oldXMin) * factor;
     m_viewXMax = cx + (oldXMax - cx) * factor;
 
-    double cy = widgetToValue(pos.y());
-    double oldYMin = m_viewYMin, oldYMax = m_viewYMax;
-    m_viewYMin = cy - (cy - oldYMin) * factor;
-    m_viewYMax = cy + (oldYMax - cy) * factor;
+    // 双 Y 轴:以光标像素高度比例为锚点,同步缩放两个纵轴
+    const double fy = (pos.y() - m_plotArea.top()) / m_plotArea.height();
+    {
+        const double range = m_viewPosMax - m_viewPosMin;
+        const double anchor = m_viewPosMax - fy * range;
+        const double newRange = range * factor;
+        m_viewPosMax = anchor + fy * newRange;
+        m_viewPosMin = m_viewPosMax - newRange;
+    }
+    {
+        const double range = m_viewVelMax - m_viewVelMin;
+        const double anchor = m_viewVelMax - fy * range;
+        const double newRange = range * factor;
+        m_viewVelMax = anchor + fy * newRange;
+        m_viewVelMin = m_viewVelMax - newRange;
+    }
 
-    double xMargin = (m_fullXMax - m_fullXMin) * 2;
-    double yMargin = (m_fullYMax - m_fullYMin) * 2;
+    // 限幅:不超出全量范围外 2 倍
+    const double xMargin = (m_fullXMax - m_fullXMin) * 2;
     if (m_viewXMin < m_fullXMin - xMargin) m_viewXMin = m_fullXMin - xMargin;
     if (m_viewXMax > m_fullXMax + xMargin) m_viewXMax = m_fullXMax + xMargin;
-    if (m_viewYMin < m_fullYMin - yMargin) m_viewYMin = m_fullYMin - yMargin;
-    if (m_viewYMax > m_fullYMax + yMargin) m_viewYMax = m_fullYMax + yMargin;
+    const double posMargin = (m_fullPosMax - m_fullPosMin) * 2;
+    if (m_viewPosMin < m_fullPosMin - posMargin) m_viewPosMin = m_fullPosMin - posMargin;
+    if (m_viewPosMax > m_fullPosMax + posMargin) m_viewPosMax = m_fullPosMax + posMargin;
+    const double velMargin = (m_fullVelMax - m_fullVelMin) * 2;
+    if (m_viewVelMin < m_fullVelMin - velMargin) m_viewVelMin = m_fullVelMin - velMargin;
+    if (m_viewVelMax > m_fullVelMax + velMargin) m_viewVelMax = m_fullVelMax + velMargin;
 
     m_userZoomed = true;
     invalidateStaticCache();

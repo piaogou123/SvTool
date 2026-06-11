@@ -24,9 +24,8 @@ public:
 private slots:
     void onOpenFile();
     void onFileDropped(const QString &path);
-    void onCursorMoved(double time, int idx, const QMap<QString, double> &values);
+    void onCursorMoved(double time, int idx);
     void onVisibilityChanged();
-    void onModeChanged(int index);
     void onShowDirectionAnalysis();
 
 private:
@@ -40,7 +39,6 @@ private:
     void updateResponseAt(int idx);
     void rebuildAxisWidgets(const QStringList &axisNames);
     void rebuildStatsHtml();
-    QString unitFor(const QString &axis) const;   // 当前模式下的单位文本
 
 protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
@@ -52,7 +50,9 @@ protected:
 
     // Dynamic per-axis toolbar widgets
     QToolBar    *m_toolBar;
-    QComboBox   *m_modeCombo;        // 位置误差 / 速度误差
+    QCheckBox   *m_chkErr;       // 曲线类型:位置误差
+    QCheckBox   *m_chkCmdVel;    // 曲线类型:速度指令
+    QCheckBox   *m_chkFbVel;     // 曲线类型:速度反馈
     QWidget     *m_chkContainer;
     QHBoxLayout *m_chkLayout;
     QMap<QString, QCheckBox*> m_chkShow;
