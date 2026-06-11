@@ -156,19 +156,30 @@ void MainWindow::setupCursorDock()
 
     QWidget *container = new QWidget();
     QHBoxLayout *lay = new QHBoxLayout(container);
-    lay->setContentsMargins(8, 4, 8, 4);
+    lay->setContentsMargins(10, 8, 10, 8);
 
     m_lblCursor = new QLabel(
-        QString::fromUtf8("在图表上移动鼠标以查看误差值"));
+        QString::fromUtf8(
+            "<div style='font-size:12px;color:#666;'>"
+            "在图表上移动鼠标以查看光标数据"
+            "</div>"));
     m_lblCursor->setTextFormat(Qt::RichText);
     m_lblCursor->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    m_lblCursor->setStyleSheet(
+        "QLabel {"
+        "  background: #fafafa;"
+        "  border: 1px solid #d8dce2;"
+        "  border-radius: 5px;"
+        "  padding: 8px 10px;"
+        "  color: #202124;"
+        "}");
     // stretch=1: label fills the full width so word-wrap never changes row count
     lay->addWidget(m_lblCursor, 1);
 
     // Fixed height breaks the layout-feedback loop that causes value jumping:
     //   setText() → dock resizes → ChartView resizes → plotArea changes →
     //   same mouse pixel maps to different time → different index → setText() again
-    container->setFixedHeight(110);
+    container->setFixedHeight(138);
 
     dock->setWidget(container);
     addDockWidget(Qt::BottomDockWidgetArea, dock);
@@ -327,12 +338,21 @@ void MainWindow::onCursorMoved(double time, int idx)
 
     // 底部面板:按轴一行,列出位置误差 / 速度指令 / 速度反馈
     QString text = QString::fromUtf8(
-        "<table cellspacing=2>"
-        "<tr><td><b>时间:</b></td><td colspan=3>%1 ms</td></tr>"
-        "<tr><td></td>"
-        "<td><b style='color:#666'>位置误差</b></td>"
-        "<td><b style='color:#666'>速度指令</b></td>"
-        "<td><b style='color:#666'>速度反馈</b></td></tr>")
+        "<table width='100%' cellspacing='0' cellpadding='0' "
+        "style='font-size:12px;color:#202124;'>"
+        "<tr>"
+        "<td colspan='4' style='padding:0 0 8px 0;'>"
+        "<span style='color:#6b7280;font-weight:bold;'>时间</span>"
+        "&nbsp;&nbsp;"
+        "<span style='font-family:Consolas,monospace;font-weight:bold;'>%1 ms</span>"
+        "</td>"
+        "</tr>"
+        "<tr bgcolor='#eef1f5'>"
+        "<td width='76' style='padding:5px 10px;color:#6b7280;'></td>"
+        "<td align='right' style='padding:5px 14px;color:#5f6368;font-weight:bold;'>位置误差</td>"
+        "<td align='right' style='padding:5px 14px;color:#5f6368;font-weight:bold;'>速度指令</td>"
+        "<td align='right' style='padding:5px 14px;color:#5f6368;font-weight:bold;'>速度反馈</td>"
+        "</tr>")
         .arg(time * 1000.0, 0, 'f', 3);
 
     for (const QString &name : m_curData.axisOrder) {
@@ -345,17 +365,28 @@ void MainWindow::onCursorMoved(double time, int idx)
                              ? m_chartView->errColorFor(name)
                              : QColor(128, 128, 128);
         QString row = QString::fromUtf8(
-            "<tr><td><b style='color:%1'>%2 轴</b></td>"
-            "<td>%3 %4</td>")
+            "<tr>"
+            "<td style='padding:7px 10px;'>"
+            "<span style='color:%1;font-size:13px;'>&#9679;</span>"
+            "&nbsp;<b style='color:%1'>%2 轴</b>"
+            "</td>"
+            "<td align='right' style='padding:7px 14px;font-family:Consolas,monospace;'>"
+            "%3 <span style='color:#6b7280'>%4</span></td>")
                           .arg(c.name()).arg(name)
                           .arg(ch.err[idx], 0, 'f', 6).arg(posUnit);
         if (ch.hasVelocity()) {
-            row += QString::fromUtf8("<td>%1 %3</td><td>%2 %3</td>")
+            row += QString::fromUtf8(
+                "<td align='right' style='padding:7px 14px;font-family:Consolas,monospace;'>"
+                "%1 <span style='color:#6b7280'>%3</span></td>"
+                "<td align='right' style='padding:7px 14px;font-family:Consolas,monospace;'>"
+                "%2 <span style='color:#6b7280'>%3</span></td>")
                        .arg(ch.cmdVel[idx], 0, 'f', 1)
                        .arg(ch.fbVel[idx], 0, 'f', 1)
                        .arg(velUnit);
         } else {
-            row += QString::fromUtf8("<td>—</td><td>—</td>");
+            row += QString::fromUtf8(
+                "<td align='right' style='padding:7px 14px;color:#9aa0a6;'>—</td>"
+                "<td align='right' style='padding:7px 14px;color:#9aa0a6;'>—</td>");
         }
         row += "</tr>";
         text += row;
