@@ -6,7 +6,9 @@
 
 class ChartView;
 class DirectionDialog;
+class DiagnosisDialog;
 class QCheckBox;
+class QComboBox;
 class QLabel;
 class QScrollArea;
 class QToolBar;
@@ -23,9 +25,11 @@ public:
 private slots:
     void onOpenFile();
     void onFileDropped(const QString &path);
-    void onCursorMoved(double time, int idx, const QMap<QString, double> &errors);
+    void onCursorMoved(double time, int idx, const QMap<QString, double> &values);
     void onVisibilityChanged();
+    void onModeChanged(int index);
     void onShowDirectionAnalysis();
+    void onShowDiagnosis();
 
 private:
     void loadFile(const QString &filePath);
@@ -37,6 +41,8 @@ private:
     void setupStatusBar();
     void updateResponseAt(int idx);
     void rebuildAxisWidgets(const QStringList &axisNames);
+    void rebuildStatsHtml();
+    QString unitFor(const QString &axis) const;   // 当前模式下的单位文本
 
 protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
@@ -48,6 +54,7 @@ protected:
 
     // Dynamic per-axis toolbar widgets
     QToolBar    *m_toolBar;
+    QComboBox   *m_modeCombo;        // 位置误差 / 速度误差
     QWidget     *m_chkContainer;
     QHBoxLayout *m_chkLayout;
     QMap<QString, QCheckBox*> m_chkShow;
@@ -58,11 +65,17 @@ protected:
     QWidget     *m_respContainer;
     QVBoxLayout *m_respLayout;
     QMap<QString, QLabel*> m_lblResp;
+    QMap<QString, QString> m_statsHtml;   // 每轴统计 HTML(载入时生成一次)
 
     // Direction analysis dialog (non-modal, created on first use)
     DirectionDialog *m_dirDialog;
     QAction         *m_dirAct;
 
+    // Servo diagnosis dialog (non-modal, created on first use)
+    DiagnosisDialog *m_diagDialog;
+    QAction         *m_diagAct;
+
     // Data
     Dataset    m_curData;
+    QString    m_curFilePath;
 };

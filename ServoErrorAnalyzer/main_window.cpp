@@ -1,6 +1,7 @@
 #include "main_window.h"
 #include "chart_view.h"
 #include "data_loader.h"
+#include "diagnosis_dialog.h"
 #include "direction_dialog.h"
 
 #include <QMenuBar>
@@ -9,6 +10,7 @@
 #include <QDockWidget>
 #include <QScrollArea>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QLabel>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -21,18 +23,27 @@
 #include <QDropEvent>
 #include <QMimeData>
 
+#include <cmath>
+
 
 static QLabel *makeAxisResponseLabel(int colorIdx)
 {
-    QLabel *lbl = new QLabel("—");
+    QLabel *lbl = new QLabel(QString::fromUtf8("—"));
     lbl->setTextFormat(Qt::RichText);
     lbl->setStyleSheet(QString(
         "QLabel { background: %1; border-radius: 6px; padding: 10px; "
         "color: #fff; font-size: 12px; }"
     ).arg(ChartView::axisColor(colorIdx).name()));
-    lbl->setMinimumHeight(110);
+    lbl->setMinimumHeight(150);
     lbl->setWordWrap(true);
     return lbl;
+}
+
+static QString fmtMs(double seconds)
+{
+    if (std::isnan(seconds))
+        return QString::fromUtf8("—");
+    return QString::number(seconds * 1000.0, 'f', 3) + " ms";
 }
 
 // --- MainWindow ----------------------------------------------------------
@@ -41,14 +52,15 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_dirDialog(nullptr)
     , m_dirAct(nullptr)
+    , m_diagDialog(nullptr)
+    , m_diagAct(nullptr)
 {
     setupUi();
 }
 
 void MainWindow::setupUi()
 {
-    setWindowTitle(QString::fromUtf8(
-        "\xe4\xbc\xba\xe6\x9c\x8d\xe8\xaf\xaf\xe5\xb7\xae\xe5\x88\x86\xe6\x9e\x90\xe4\xbb\xaa"));  // 伺服误差分析仪
+    setWindowTitle(QString::fromUtf8("伺服误差分析仪"));
     resize(1200, 750);
     setAcceptDrops(true);
 
@@ -71,18 +83,15 @@ void MainWindow::setupUi()
 
 void MainWindow::setupMenuBar()
 {
-    QMenu *fileMenu = menuBar()->addMenu(
-        QString::fromUtf8("\xe6\x96\x87\xe4\xbb\xb6(&F)"));  // 文件
+    QMenu *fileMenu = menuBar()->addMenu(QString::fromUtf8("文件(&F)"));
 
-    QAction *openAct = fileMenu->addAction(
-        QString::fromUtf8("\xe6\x89\x93\xe5\xbc\x80(&O)..."));  // 打开
+    QAction *openAct = fileMenu->addAction(QString::fromUtf8("打开(&O)..."));
     openAct->setShortcut(QKeySequence::Open);
     connect(openAct, &QAction::triggered, this, &MainWindow::onOpenFile);
 
     fileMenu->addSeparator();
 
-    QAction *exitAct = fileMenu->addAction(
-        QString::fromUtf8("\xe9\x80\x80\xe5\x87\xba(&X)"));  // 退出
+    QAction *exitAct = fileMenu->addAction(QString::fromUtf8("退出(&X)"));
     exitAct->setShortcut(QKeySequence::Quit);
     connect(exitAct, &QAction::triggered, this, &QWidget::close);
 }
@@ -91,21 +100,38 @@ void MainWindow::setupMenuBar()
 
 void MainWindow::setupToolBar()
 {
-    m_toolBar = addToolBar(
-        QString::fromUtf8("\xe4\xb8\xbb\xe5\xb7\xa5\xe5\x85\xb7\xe6\xa0\x8f"));  // 主工具栏
+    m_toolBar = addToolBar(QString::fromUtf8("主工具栏"));
     m_toolBar->setMovable(false);
 
-    QAction *openAct = m_toolBar->addAction(
-        QString::fromUtf8("\xe6\x89\x93\xe5\xbc\x80"));  // 打开
+    QAction *openAct = m_toolBar->addAction(QString::fromUtf8("打开"));
     connect(openAct, &QAction::triggered, this, &MainWindow::onOpenFile);
 
     m_toolBar->addSeparator();
 
-    m_dirAct = m_toolBar->addAction(
-        QString::fromUtf8("\xe6\x96\xb9\xe5\x90\x91\xe5\x88\x86\xe6\x9e\x90"));  // 方向分析
+    m_dirAct = m_toolBar->addAction(QString::fromUtf8("方向分析"));
     m_dirAct->setEnabled(false);
     connect(m_dirAct, &QAction::triggered,
             this, &MainWindow::onShowDirectionAnalysis);
+
+    m_diagAct = m_toolBar->addAction(QString::fromUtf8("诊断报告"));
+    m_diagAct->setEnabled(false);
+    connect(m_diagAct, &QAction::triggered,
+            this, &MainWindow::onShowDiagnosis);
+
+    m_toolBar->addSeparator();
+
+    // 显示模式:位置误差 / 速度误差(文件含速度列时可用)
+    QLabel *modeLbl = new QLabel(QString::fromUtf8(" 显示: "), m_toolBar);
+    modeLbl->setStyleSheet("color: #555; font-weight: bold;");
+    m_toolBar->addWidget(modeLbl);
+
+    m_modeCombo = new QComboBox(m_toolBar);
+    m_modeCombo->addItem(QString::fromUtf8("位置误差"));
+    m_modeCombo->addItem(QString::fromUtf8("速度误差"));
+    m_modeCombo->setEnabled(false);
+    connect(m_modeCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, &MainWindow::onModeChanged);
+    m_toolBar->addWidget(m_modeCombo);
 
     m_toolBar->addSeparator();
 
@@ -121,19 +147,15 @@ void MainWindow::setupToolBar()
 
 void MainWindow::setupCursorDock()
 {
-    QDockWidget *dock = new QDockWidget(
-        QString::fromUtf8("\xe5\x85\x89\xe6\xa0\x87\xe4\xbf\xa1\xe6\x81\xaf"), this);  // 光标信息
+    QDockWidget *dock = new QDockWidget(QString::fromUtf8("光标信息"), this);
     dock->setFeatures(QDockWidget::NoDockWidgetFeatures);
 
     QWidget *container = new QWidget();
     QHBoxLayout *lay = new QHBoxLayout(container);
     lay->setContentsMargins(8, 4, 8, 4);
 
-    // 在图表上移动鼠标以查看误差值
-    m_lblCursor = new QLabel(QString::fromUtf8(
-        "\xe5\x9c\xa8\xe5\x9b\xbe\xe8\xa1\xa8\xe4\xb8\x8a\xe7\xa7\xbb\xe5\x8a\xa8"
-        "\xe9\xbc\xa0\xe6\xa0\x87\xe4\xbb\xa5\xe6\x9f\xa5\xe7\x9c\x8b\xe8\xaf\xaf"
-        "\xe5\xb7\xae\xe5\x80\xbc"));
+    m_lblCursor = new QLabel(
+        QString::fromUtf8("在图表上移动鼠标以查看误差值"));
     m_lblCursor->setTextFormat(Qt::RichText);
     m_lblCursor->setAlignment(Qt::AlignTop | Qt::AlignLeft);
     // stretch=1: label fills the full width so word-wrap never changes row count
@@ -152,18 +174,15 @@ void MainWindow::setupCursorDock()
 
 void MainWindow::setupResponseDock()
 {
-    QDockWidget *dock = new QDockWidget(
-        QString::fromUtf8("\xe5\x93\x8d\xe5\xba\x94\xe6\x97\xb6\xe9\x97\xb4"), this);  // 响应时间
+    QDockWidget *dock = new QDockWidget(QString::fromUtf8("响应时间"), this);
     dock->setFeatures(QDockWidget::NoDockWidgetFeatures);
 
     QWidget *outer = new QWidget();
     QVBoxLayout *outerLayout = new QVBoxLayout(outer);
     outerLayout->setContentsMargins(8, 8, 8, 8);
 
-    // 请加载 CSV 文件以查看分析
-    m_lblRespTitle = new QLabel(QString::fromUtf8(
-        "\xe8\xaf\xb7\xe5\x8a\xa0\xe8\xbd\xbd CSV "
-        "\xe6\x96\x87\xe4\xbb\xb6\xe4\xbb\xa5\xe6\x9f\xa5\xe7\x9c\x8b\xe5\x88\x86\xe6\x9e\x90"));
+    m_lblRespTitle = new QLabel(
+        QString::fromUtf8("请加载 CSV 文件以查看分析"));
     m_lblRespTitle->setWordWrap(true);
     m_lblRespTitle->setStyleSheet("font-weight: bold; font-size: 13px; color: #555;");
     outerLayout->addWidget(m_lblRespTitle);
@@ -182,7 +201,7 @@ void MainWindow::setupResponseDock()
     m_scrollResp->setWidget(m_respContainer);
     outerLayout->addWidget(m_scrollResp, 1);
 
-    outer->setMinimumSize(230, 450);
+    outer->setMinimumSize(250, 450);
     dock->setWidget(outer);
     addDockWidget(Qt::RightDockWidgetArea, dock);
 }
@@ -191,13 +210,8 @@ void MainWindow::setupResponseDock()
 
 void MainWindow::setupStatusBar()
 {
-    // 未加载文件。请从 文件 > 打开 菜单，或将 CSV 文件拖入图表。
     m_lblFileInfo = new QLabel(QString::fromUtf8(
-        "\xe6\x9c\xaa\xe5\x8a\xa0\xe8\xbd\xbd\xe6\x96\x87\xe4\xbb\xb6\xe3\x80\x82"
-        "\xe8\xaf\xb7\xe4\xbb\x8e \xe6\x96\x87\xe4\xbb\xb6 > "
-        "\xe6\x89\x93\xe5\xbc\x80 \xe8\x8f\x9c\xe5\x8d\x95\xef\xbc\x8c"
-        "\xe6\x88\x96\xe5\xb0\x86 CSV "
-        "\xe6\x96\x87\xe4\xbb\xb6\xe6\x8b\x96\xe5\x85\xa5\xe5\x9b\xbe\xe8\xa1\xa8\xe3\x80\x82"));
+        "未加载文件。请从 文件 > 打开 菜单,或将 CSV 文件拖入图表。"));
     statusBar()->addWidget(m_lblFileInfo);
 }
 
@@ -241,14 +255,57 @@ void MainWindow::rebuildAxisWidgets(const QStringList &axisNames)
     }
 }
 
+// 每轴全程统计 HTML(载入时生成一次,光标移动时直接拼接)
+void MainWindow::rebuildStatsHtml()
+{
+    m_statsHtml.clear();
+    for (const QString &name : m_curData.axisOrder) {
+        const AxisChannel &ch = m_curData.axes[name];
+        const ResponseStats &st = ch.stats;
+        const QString posUnit =
+            (name == "C" || name == "A") ? "deg" : "mm";
+
+        QString html = QString::fromUtf8(
+            "<div style='font-weight:bold;font-size:14px;margin-bottom:2px;'>"
+            "%1 轴</div>"
+            "<div style='font-size:11px;opacity:0.85;margin-bottom:2px;'>"
+            "── 全程统计 ──</div>").arg(name);
+
+        if (st.valid) {
+            html += QString::fromUtf8(
+                "<table style='font-size:11px;' cellspacing=1>"
+                "<tr><td>平均响应</td><td align=right><b>%1</b></td></tr>"
+                "<tr><td>最大响应</td><td align=right>%2</td></tr>"
+                "<tr><td>中位数</td><td align=right>%3</td></tr>"
+                "<tr><td>标准差</td><td align=right>%4</td></tr>"
+                "<tr><td>无响应点</td><td align=right>%5 / %6</td></tr>"
+                "<tr><td>最大|误差|</td><td align=right><b>%7 %9</b></td></tr>"
+                "<tr><td>RMS 误差</td><td align=right>%8 %9</td></tr>"
+                "</table>")
+                .arg(fmtMs(st.avg))
+                .arg(fmtMs(st.max))
+                .arg(fmtMs(st.median))
+                .arg(fmtMs(st.stdDev))
+                .arg(st.noRespCount)
+                .arg(st.movingCount + st.noRespCount)
+                .arg(st.maxAbsErr, 0, 'f', 6)
+                .arg(st.rmsErr, 0, 'f', 6)
+                .arg(posUnit);
+        } else {
+            html += QString::fromUtf8(
+                "<div style='font-size:11px;'><i>无运动段</i></div>");
+        }
+        m_statsHtml[name] = html;
+    }
+}
+
 // --- Slots -------------------------------------------------------------
 
 void MainWindow::onOpenFile()
 {
     QString path = QFileDialog::getOpenFileName(
         this,
-        // 打开 CSV 数据文件
-        QString::fromUtf8("\xe6\x89\x93\xe5\xbc\x80 CSV \xe6\x95\xb0\xe6\x8d\xae\xe6\x96\x87\xe4\xbb\xb6"),
+        QString::fromUtf8("打开 CSV 数据文件"),
         QString(),
         "CSV Files (*.csv);;All Files (*)");
     if (!path.isEmpty())
@@ -260,28 +317,33 @@ void MainWindow::onFileDropped(const QString &path)
     loadFile(path);
 }
 
+QString MainWindow::unitFor(const QString &axis) const
+{
+    const bool deg = (axis == "C" || axis == "A");
+    if (m_modeCombo->currentIndex() == 1)   // 速度误差
+        return deg ? QString::fromUtf8("deg/min") : QString::fromUtf8("mm/min");
+    return deg ? QString::fromUtf8("deg") : QString::fromUtf8("mm");
+}
+
 void MainWindow::onCursorMoved(double time, int idx,
-                               const QMap<QString, double> &errors)
+                               const QMap<QString, double> &values)
 {
     // Bottom panel: error values — dynamic table
-    // 时间：
     QString text = QString::fromUtf8(
-        "<table><tr><td><b>\xe6\x97\xb6\xe9\x97\xb4\xef\xbc\x9a</b></td>"
+        "<table><tr><td><b>时间:</b></td>"
         "<td>%1 s</td></tr>").arg(time, 0, 'f', 6);
 
-    for (auto it = errors.begin(); it != errors.end(); ++it) {
+    for (auto it = values.begin(); it != values.end(); ++it) {
         const QString &name = it.key();
-        double err = it.value();
-        QString unit = (name == "C" || name == "A") ? "deg" : "mm";
+        double v = it.value();
         QColor c = m_chartView->isSeriesVisible(name)
                        ? ChartView::axisColor(m_curData.axisOrder.indexOf(name))
                        : QColor(128, 128, 128);
-        // %2 误差：
         text += QString::fromUtf8(
-            "<tr><td><b style='color:%1'>%2 "
-            "\xe8\xaf\xaf\xe5\xb7\xae\xef\xbc\x9a</b></td>"
+            "<tr><td><b style='color:%1'>%2 误差:</b></td>"
             "<td>%3 %4</td></tr>")
-                    .arg(c.name()).arg(name).arg(err, 0, 'f', 6).arg(unit);
+                    .arg(c.name()).arg(name)
+                    .arg(v, 0, 'f', 6).arg(unitFor(name));
     }
     text += "</table>";
     m_lblCursor->setText(text);
@@ -302,8 +364,14 @@ void MainWindow::onVisibilityChanged()
     }
     if (axis.isEmpty()) return;
 
+    // ChartView 内部决定是否重置视野(用户已缩放则保留当前视野)
     m_chartView->setSeriesVisible(axis, cb->isChecked());
-    m_chartView->zoomReset();
+}
+
+void MainWindow::onModeChanged(int index)
+{
+    m_chartView->setDisplayMode(index == 1 ? ChartView::Mode::VelError
+                                           : ChartView::Mode::PosError);
 }
 
 void MainWindow::loadFile(const QString &filePath)
@@ -312,45 +380,46 @@ void MainWindow::loadFile(const QString &filePath)
     QString error;
     if (!DataLoader::loadCsv(filePath, data, &error)) {
         QMessageBox::warning(this,
-            QString::fromUtf8("\xe5\x8a\xa0\xe8\xbd\xbd\xe9\x94\x99\xe8\xaf\xaf"),  // 加载错误
-            error);
+            QString::fromUtf8("加载错误"), error);
         return;
     }
 
     m_curData = data;
+    m_curFilePath = filePath;
     rebuildAxisWidgets(data.axisOrder);
+    rebuildStatsHtml();
+
+    // 速度误差模式仅在文件含速度列时可用
+    bool hasVel = false;
+    for (const auto &name : data.axisOrder)
+        if (data.axes[name].hasVelocity()) { hasVel = true; break; }
+    if (!hasVel)
+        m_modeCombo->setCurrentIndex(0);
+    m_modeCombo->setEnabled(hasVel);
 
     m_chartView->setAxisData(data);
 
     m_dirAct->setEnabled(true);
+    m_diagAct->setEnabled(true);
     if (m_dirDialog && m_dirDialog->isVisible())
         m_dirDialog->updateData(m_curData);
+    if (m_diagDialog && m_diagDialog->isVisible())
+        m_diagDialog->updateData(m_curData, m_curFilePath);
 
-    // <b>响应时间</b>  <span>(光标点详情)</span>
     m_lblRespTitle->setText(QString::fromUtf8(
-        "<b>\xe5\x93\x8d\xe5\xba\x94\xe6\x97\xb6\xe9\x97\xb4</b>"
+        "<b>响应时间</b>"
         "  <span style='color:#888;font-size:11px;'>"
-        "(\xe5\x85\x89\xe6\xa0\x87\xe7\x82\xb9\xe8\xaf\xa6\xe6\x83\x85)"
-        "</span>"));
+        "(全程统计 + 光标点详情)</span>"));
 
     QFileInfo fi(filePath);
-    // 文件：%1  |  %2 个数据点
     m_lblFileInfo->setText(
-        QString::fromUtf8("\xe6\x96\x87\xe4\xbb\xb6\xef\xbc\x9a%1  |  %2 "
-                          "\xe4\xb8\xaa\xe6\x95\xb0\xe6\x8d\xae\xe7\x82\xb9")
+        QString::fromUtf8("文件:%1  |  %2 个数据点")
         .arg(fi.fileName()).arg(data.size()));
-    // 伺服误差分析仪 - %1
     setWindowTitle(
-        QString::fromUtf8("\xe4\xbc\xba\xe6\x9c\x8d\xe8\xaf\xaf\xe5\xb7\xae"
-                          "\xe5\x88\x86\xe6\x9e\x90\xe4\xbb\xaa - %1")
-        .arg(fi.fileName()));
+        QString::fromUtf8("伺服误差分析仪 - %1").arg(fi.fileName()));
 }
 
 // --- Response panel: per-point detail -----------------------------------
-
-static QString fmtMs(double seconds) {
-    return QString::number(seconds * 1000.0, 'f', 3) + " ms";
-}
 
 void MainWindow::updateResponseAt(int idx)
 {
@@ -362,33 +431,38 @@ void MainWindow::updateResponseAt(int idx)
         const AxisChannel &ch = m_curData.axes[name];
 
         int j = ch.bestIdx[idx];
-        double t1 = m_curData.time[j];
-        double startPos = ch.cmd[idx];
-        double endPos   = ch.fb[j];
-        double resp     = ch.respLag[idx];
+        double resp = ch.respLag[idx];
+        const bool noResp = std::isnan(resp);
 
-        // %1轴 / 起始时间 / 结束时间 / 起始位置 / 到达位置 / 响应延迟
-        QString html = QString::fromUtf8(
-            "<div style='font-weight:bold;font-size:14px;margin-bottom:4px;'>"
-            "%1 \xe8\xbd\xb4</div>"
-            "<table style='font-size:12px;' cellspacing=1>"
-            "<tr><td>\xe8\xb5\xb7\xe5\xa7\x8b\xe6\x97\xb6\xe9\x97\xb4</td>"
-            "<td align=right><b>%2 s</b></td></tr>"
-            "<tr><td>\xe7\xbb\x93\xe6\x9d\x9f\xe6\x97\xb6\xe9\x97\xb4</td>"
-            "<td align=right><b>%3 s</b></td></tr>"
-            "<tr><td>\xe8\xb5\xb7\xe5\xa7\x8b\xe4\xbd\x8d\xe7\xbd\xae</td>"
-            "<td align=right>%4</td></tr>"
-            "<tr><td>\xe5\x88\xb0\xe8\xbe\xbe\xe4\xbd\x8d\xe7\xbd\xae</td>"
-            "<td align=right>%5</td></tr>"
-            "<tr><td>\xe5\x93\x8d\xe5\xba\x94\xe5\xbb\xb6\xe8\xbf\x9f</td>"
-            "<td align=right><b>%6</b></td></tr>"
-            "</table>"
-        ).arg(name)
-         .arg(t0, 0, 'f', 6)
-         .arg(t1, 0, 'f', 6)
-         .arg(startPos, 0, 'f', 6)
-         .arg(endPos, 0, 'f', 6)
-         .arg(fmtMs(resp));
+        QString html = m_statsHtml.value(name);
+        html += QString::fromUtf8(
+            "<div style='font-size:11px;opacity:0.85;margin-top:4px;"
+            "margin-bottom:2px;'>── 光标点详情 ──</div>");
+
+        if (noResp) {
+            html += QString::fromUtf8(
+                "<table style='font-size:12px;' cellspacing=1>"
+                "<tr><td>起始时间</td><td align=right><b>%1 s</b></td></tr>"
+                "<tr><td>起始位置</td><td align=right>%2</td></tr>"
+                "<tr><td>响应延迟</td><td align=right><b>—(未到达)</b></td></tr>"
+                "</table>")
+                .arg(t0, 0, 'f', 6)
+                .arg(ch.cmd[idx], 0, 'f', 6);
+        } else {
+            html += QString::fromUtf8(
+                "<table style='font-size:12px;' cellspacing=1>"
+                "<tr><td>起始时间</td><td align=right><b>%1 s</b></td></tr>"
+                "<tr><td>结束时间</td><td align=right><b>%2 s</b></td></tr>"
+                "<tr><td>起始位置</td><td align=right>%3</td></tr>"
+                "<tr><td>到达位置</td><td align=right>%4</td></tr>"
+                "<tr><td>响应延迟</td><td align=right><b>%5</b></td></tr>"
+                "</table>")
+                .arg(t0, 0, 'f', 6)
+                .arg(m_curData.time[j], 0, 'f', 6)
+                .arg(ch.cmd[idx], 0, 'f', 6)
+                .arg(ch.fb[j], 0, 'f', 6)
+                .arg(fmtMs(resp));
+        }
 
         QLabel *lbl = m_lblResp.value(name);
         if (lbl) lbl->setText(html);
@@ -408,6 +482,17 @@ void MainWindow::onShowDirectionAnalysis()
     m_dirDialog->show();
     m_dirDialog->raise();
     m_dirDialog->activateWindow();
+}
+
+void MainWindow::onShowDiagnosis()
+{
+    if (!m_diagDialog) {
+        m_diagDialog = new DiagnosisDialog(this);
+    }
+    m_diagDialog->updateData(m_curData, m_curFilePath);
+    m_diagDialog->show();
+    m_diagDialog->raise();
+    m_diagDialog->activateWindow();
 }
 
 // --- Drag-and-drop on the main window itself ---------------------------

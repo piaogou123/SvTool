@@ -1,8 +1,13 @@
 release/
+debug/
 *.o
 *.exe
 Makefile*
 .qmake.stash
 *.user
+object_script.*
+moc_*.cpp
+*.rar
+ServoErrorAnalyzer/_*.png
 ServoErrorAnalyzer/[Rr]elease/
 ServoErrorAnalyzer/release/

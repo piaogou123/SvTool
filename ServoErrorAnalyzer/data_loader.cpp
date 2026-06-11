@@ -1,169 +1,177 @@
 #include "data_loader.h"
+
 #include <QFile>
 #include <QTextStream>
-#include <QStringList>
 #include <QRegularExpression>
+#include <QStringList>
+#include <QVarLengthArray>
+
 #include <algorithm>
+#include <cmath>
 #include <limits>
+
+namespace {
+const double kNaN = std::numeric_limits<double>::quiet_NaN();
+}
 
 bool DataLoader::loadCsv(const QString &filePath, Dataset &out, QString *error)
 {
     QFile file(filePath);
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        // 无法打开文件：
-        if (error) *error = QString::fromUtf8(
-            "\xe6\x97\xa0\xe6\xb3\x95\xe6\x89\x93\xe5\xbc\x80\xe6\x96\x87\xe4\xbb\xb6\xef\xbc\x9a%1")
-            .arg(filePath);
+        if (error) *error = QString::fromUtf8("无法打开文件:%1").arg(filePath);
         return false;
     }
 
     QTextStream stream(&file);
     QString headerLine = stream.readLine();
+    // 去掉可能存在的 UTF-8 BOM
+    if (!headerLine.isEmpty() && headerLine.at(0) == QChar(0xFEFF))
+        headerLine.remove(0, 1);
 
     if (headerLine.isEmpty()) {
-        // 文件为空或缺少标题行。
-        if (error) *error = QString::fromUtf8(
-            "\xe6\x96\x87\xe4\xbb\xb6\xe4\xb8\xba\xe7\xa9\xba\xe6\x88\x96"
-            "\xe7\xbc\xba\xe5\xb0\x91\xe6\xa0\x87\xe9\xa2\x98\xe8\xa1\x8c\xe3\x80\x82");
+        if (error) *error = QString::fromUtf8("文件为空或缺少标题行。");
         return false;
     }
 
-    // --- Parse header to build column map -------------------------------
-    // Pattern: axes.mach.<l|f>.p[<axisName>]
+    // --- 解析标题行,建立列映射 ------------------------------------------
+    // 匹配 axes.mach.<l|f>.<p|v>[<轴名>]
+    //   l = 指令(command), f = 反馈(feedback)
+    //   p = 位置,          v = 速度
     static const QRegularExpression axisRe(
-        R"(axes\.mach\.([lf])\.p\[(\w+)\])");
+        R"(axes\.mach\.([lf])\.([pv])\[(\w+)\])");
 
     QStringList headers = headerLine.split(',');
     int timeCol = -1;
 
-    enum ColRole { RoleCmd, RoleFb };
-    struct ColInfo { QString axis; ColRole role; };
-    QMap<int, ColInfo> colMap;   // column index → (axis, cmd|fb)
+    struct ColInfo { QString axis; bool isCmd; bool isVel; };
+    QMap<int, ColInfo> colMap;   // 列号 → (轴名, 指令/反馈, 位置/速度)
 
     for (int ci = 0; ci < headers.size(); ++ci) {
         QString h = headers.at(ci).trimmed();
         auto m = axisRe.match(h);
         if (m.hasMatch()) {
-            QString axisName = m.captured(2);          // e.g. "X", "A", "Z"
-            bool isCmd = (m.captured(1) == "l");    // "l" = command, "f" = feedback
-            colMap[ci] = { axisName, isCmd ? RoleCmd : RoleFb };
-        } else if (h.compare("FINISHED", Qt::CaseInsensitive) == 0
-                   || h.compare("TIME", Qt::CaseInsensitive) == 0) {
+            colMap[ci] = { m.captured(3),
+                           m.captured(1) == QLatin1String("l"),
+                           m.captured(2) == QLatin1String("v") };
+        } else if (h.compare(QLatin1String("FINISHED"), Qt::CaseInsensitive) == 0
+                   || h.compare(QLatin1String("TIME"), Qt::CaseInsensitive) == 0) {
             timeCol = ci;
         }
     }
 
-    // Fallback: if no axes.mach.* columns found, assume fixed 8-column
-    // X/Y/C format: FINISHED(1), time(1), xCmd(2), yCmd(3), cCmd(4), xFb(5), yFb(6), cFb(7)
-    bool useFallback = colMap.isEmpty();
-    if (useFallback) {
+    // 兼容格式:未找到 axes.mach.* 列时按固定 8 列 X/Y/C 结构处理
+    if (colMap.isEmpty()) {
         timeCol = 1;
-        colMap[2] = { "X", RoleCmd };
-        colMap[3] = { "Y", RoleCmd };
-        colMap[4] = { "C", RoleCmd };
-        colMap[5] = { "X", RoleFb };
-        colMap[6] = { "Y", RoleFb };
-        colMap[7] = { "C", RoleFb };
+        colMap[2] = { "X", true,  false };
+        colMap[3] = { "Y", true,  false };
+        colMap[4] = { "C", true,  false };
+        colMap[5] = { "X", false, false };
+        colMap[6] = { "Y", false, false };
+        colMap[7] = { "C", false, false };
     }
 
     if (timeCol < 0) {
-        // 在标题行中未找到时间列（FINISHED）。
         if (error) *error = QString::fromUtf8(
-            "\xe5\x9c\xa8\xe6\xa0\x87\xe9\xa2\x98\xe8\xa1\x8c\xe4\xb8\xad\xe6\x9c\xaa"
-            "\xe6\x89\xbe\xe5\x88\xb0\xe6\x97\xb6\xe9\x97\xb4\xe5\x88\x97"
-            "\xef\xbc\x88""FINISHED\xef\xbc\x89\xe3\x80\x82");
+            "在标题行中未找到时间列(TIME / FINISHED)。");
         return false;
     }
 
-    // --- Initialise dataset ---------------------------------------------
+    // --- 初始化数据集 ------------------------------------------------------
     out = Dataset();
-    QMap<QString, AxisChannel> &axes = out.axes;
-    QStringList &axisOrder = out.axisOrder;
 
-    // Discover axes in header order
-    for (int ci = 0; ci < headers.size(); ++ci) {
-        auto it = colMap.find(ci);
-        if (it != colMap.end() && it->role == RoleCmd) {
-            const QString &name = it->axis;
-            if (!axes.contains(name)) {
-                axes[name] = AxisChannel();
-                axisOrder.append(name);
-            }
+    // 按位置指令列的出现顺序发现轴
+    for (auto it = colMap.begin(); it != colMap.end(); ++it) {
+        const ColInfo &info = it.value();
+        if (info.isCmd && !info.isVel && !out.axes.contains(info.axis)) {
+            out.axes[info.axis] = AxisChannel();
+            out.axisOrder.append(info.axis);
         }
     }
-
-    int estRows = 10000;
-    out.time.reserve(estRows);
-    for (auto &name : axisOrder) {
-        AxisChannel &ch = axes[name];
-        ch.cmd.reserve(estRows);
-        ch.fb.reserve(estRows);
-        ch.err.reserve(estRows);
+    if (out.axisOrder.isEmpty()) {
+        if (error) *error = QString::fromUtf8(
+            "标题行中未找到任何轴的位置指令列。");
+        return false;
     }
 
-    // --- Read data rows -------------------------------------------------
+    // 列号 → 目标向量指针表:建一次表,逐行解析时零查找开销。
+    // QMap 节点地址稳定,此后不再插入新轴,取指针安全。
+    struct ColTarget { int col; QVector<double> *vec; };
+    QVector<ColTarget> targets;
+    targets.reserve(colMap.size());
+    int maxCol = timeCol;
+    for (auto it = colMap.begin(); it != colMap.end(); ++it) {
+        const ColInfo &info = it.value();
+        auto axIt = out.axes.find(info.axis);
+        if (axIt == out.axes.end()) continue;   // 只有速度列、没有位置指令列的轴
+        AxisChannel &ch = axIt.value();
+        QVector<double> *vec = info.isVel
+            ? (info.isCmd ? &ch.cmdVel : &ch.fbVel)
+            : (info.isCmd ? &ch.cmd    : &ch.fb);
+        targets.append({ it.key(), vec });
+        maxCol = std::max(maxCol, it.key());
+    }
+
+    // 按文件大小估算行数,减少扩容次数
+    const int estRows = static_cast<int>(file.size() / 80) + 256;
+    out.time.reserve(estRows);
+    for (const ColTarget &t : targets)
+        t.vec->reserve(estRows);
+
+    // --- 逐行读取数据 -------------------------------------------------------
+    QVarLengthArray<double, 32> rowVals(targets.size());
     while (!stream.atEnd()) {
-        QString line = stream.readLine().trimmed();
+        const QString line = stream.readLine();
         if (line.isEmpty()) continue;
 
-        QStringList fields = line.split(',');
-        if (fields.size() <= timeCol || fields.size() <= colMap.lastKey()) {
-            continue;
-        }
+        const QVector<QStringRef> fields = line.splitRef(',');
+        if (fields.size() <= maxCol) continue;
 
-        bool ok = true;
+        // 先把整行解析到临时缓冲,全部成功才提交,避免逐列回退
+        bool ok = false;
         double t = fields.at(timeCol).trimmed().toDouble(&ok);
-        if (!ok) { continue; }
+        if (!ok) continue;     // 单位行 / 非数据行
+
+        for (int k = 0; k < targets.size(); ++k) {
+            rowVals[k] = fields.at(targets[k].col).trimmed().toDouble(&ok);
+            if (!ok) break;
+        }
+        if (!ok) continue;
 
         out.time.append(t);
-
-        // Read per-axis cmd/fb via column map
-        for (auto it = colMap.begin(); it != colMap.end(); ++it) {
-            int ci = it.key();
-            const ColInfo &info = it.value();
-            if (!axes.contains(info.axis)) continue;
-            double val = fields.at(ci).trimmed().toDouble(&ok);
-            if (!ok) break;
-            if (info.role == RoleCmd)
-                axes[info.axis].cmd.append(val);
-            else
-                axes[info.axis].fb.append(val);
-        }
-        if (!ok) {
-            // Back out this row if a field failed
-            out.time.removeLast();
-            for (auto &name : axisOrder) {
-                AxisChannel &ch = axes[name];
-                if (ch.cmd.size() > out.time.size()) ch.cmd.removeLast();
-                if (ch.fb.size() > out.time.size()) ch.fb.removeLast();
-            }
-            continue;
-        }
-
+        for (int k = 0; k < targets.size(); ++k)
+            targets[k].vec->append(rowVals[k]);
     }
 
     if (out.isEmpty()) {
-        // 文件中未找到有效数据行。
-        if (error) *error = QString::fromUtf8(
-            "\xe6\x96\x87\xe4\xbb\xb6\xe4\xb8\xad\xe6\x9c\xaa\xe6\x89\xbe\xe5\x88\xb0"
-            "\xe6\x9c\x89\xe6\x95\x88\xe6\x95\xb0\xe6\x8d\xae\xe8\xa1\x8c\xe3\x80\x82");
+        if (error) *error = QString::fromUtf8("文件中未找到有效数据行。");
         return false;
     }
 
-    // Compute errors
-    for (auto &name : axisOrder) {
-        AxisChannel &ch = axes[name];
-        int n = ch.cmd.size();
+    // --- 计算误差 ------------------------------------------------------------
+    const int n = out.time.size();
+    for (auto &name : out.axisOrder) {
+        AxisChannel &ch = out.axes[name];
         ch.err.resize(n);
         for (int i = 0; i < n; ++i)
             ch.err[i] = ch.cmd[i] - ch.fb[i];
+
+        // 速度误差:指令/反馈速度列齐全时才计算
+        if (ch.cmdVel.size() == n && ch.fbVel.size() == n) {
+            ch.velErr.resize(n);
+            for (int i = 0; i < n; ++i)
+                ch.velErr[i] = ch.cmdVel[i] - ch.fbVel[i];
+        } else {
+            ch.cmdVel.clear();
+            ch.fbVel.clear();
+            ch.velErr.clear();
+        }
     }
 
     computeResponseTime(out);
     return true;
 }
 
-// --- Response-time computation -----------------------------------------
+// --- 响应时间计算 -----------------------------------------------------------
 
 static bool commandIsStaticAt(const QVector<double> &cmd, int i, double eps)
 {
@@ -176,7 +184,7 @@ static bool commandIsStaticAt(const QVector<double> &cmd, int i, double eps)
 // Local direction at each point: sign of change over a short backward
 // window.  Uses simple slope (not cumulative hysteresis) so direction is
 // responsive at reversal boundaries and won't report a stale state.
-static QVector<int> localDirection(const QVector<double>& signal,
+static QVector<int> localDirection(const QVector<double> &signal,
                                    double eps, int window)
 {
     int n = signal.size();
@@ -194,6 +202,7 @@ static void computeOneAxis(const QVector<double> &time,
                            const QVector<double> &fb,
                            QVector<double> &lagOut,
                            QVector<int>    &idxOut,
+                           ResponseStats   &statsOut,
                            int maxAhead)
 {
     int n = time.size();
@@ -228,6 +237,11 @@ static void computeOneAxis(const QVector<double> &time,
     // too small for the 2-sample window to detect — the wide window
     // accumulates enough displacement to recognise slow drifts.
     QVector<int> fbDirWide = localDirection(fb, eps, 8);
+
+    // 运动点的有效响应延迟集合(用于统计;静止点不参与)
+    QVector<double> validLags;
+    validLags.reserve(n);
+    int noResp = 0;
 
     for (int i = 0; i < n; ++i) {
         if (commandIsStaticAt(cmd, i, staticEps)) {
@@ -292,6 +306,7 @@ static void computeOneAxis(const QVector<double> &time,
             if (fb_past) {
                 lagOut[i] = 0.0;
                 idxOut[i] = i;
+                validLags.append(0.0);
                 continue;
             }
         }
@@ -382,111 +397,52 @@ static void computeOneAxis(const QVector<double> &time,
 
         // A response point must be an actual same-direction arrival at the
         // target.  Near a segment peak, fb can lag so far behind lp that it
-        // reverses before ever reaching lp[i]; reporting the closest peak
-        // sample as the "end" would be a false response time.
+        // reverses before ever reaching lp[i]; lag is NaN ("未找到响应")
+        // instead of 0 so it cannot be confused with an instant response.
         if (dir != 0 && !reachedTarget) {
-            lagOut[i] = 0.0;
+            lagOut[i] = kNaN;
             idxOut[i] = i;
+            ++noResp;
             continue;
         }
 
         lagOut[i] = time[bestJ] - time[i];
         idxOut[i] = bestJ;
+        validLags.append(lagOut[i]);
     }
 
-    // ResponseStats (min/max/avg/median/stdDev) are intentionally not
-    // computed here — the fields exist in AxisChannel::stats but are not
-    // currently displayed in the UI.  Uncomment the block below if a
-    // statistics panel is added in the future.
-    //
-    // if (n == 0) return;
-    // const auto minMaxPair = std::minmax_element(lagOut.begin(), lagOut.end());
-    // statsOut.min = *minMaxPair.first;
-    // statsOut.max = *minMaxPair.second;
-    // QVector<double> sorted = lagOut;
-    // if (n % 2 == 1) {
-    //     std::nth_element(sorted.begin(), sorted.begin() + n / 2, sorted.end());
-    //     statsOut.median = sorted[n / 2];
-    // } else {
-    //     std::nth_element(sorted.begin(), sorted.begin() + n / 2 - 1, sorted.end());
-    //     const double lower = sorted[n / 2 - 1];
-    //     const double upper = *std::min_element(sorted.begin() + n / 2,
-    //                                            sorted.end());
-    //     statsOut.median = (lower + upper) / 2.0;
-    // }
-    // double sum = 0;
-    // for (double v : lagOut) sum += v;
-    // statsOut.avg = sum / n;
-    // double sqSum = 0;
-    // for (double v : lagOut) sqSum += (v - statsOut.avg) * (v - statsOut.avg);
-    // statsOut.stdDev = std::sqrt(sqSum / n);
-}
+    // --- 响应延迟统计(仅运动点) -----------------------------------------
+    statsOut = ResponseStats();
+    statsOut.noRespCount = noResp;
+    const int m = validLags.size();
+    statsOut.movingCount = m;
+    if (m == 0)
+        return;
 
-// --- Direction-statistics computation ------------------------------------
+    const auto mm = std::minmax_element(validLags.begin(), validLags.end());
+    statsOut.min = *mm.first;
+    statsOut.max = *mm.second;
 
-static DirectionStats computeOneDirection(const QString &name,
-                                          const QVector<double> &cmdProj,
-                                          const QVector<double> &fbProj)
-{
-    DirectionStats s;
-    s.name = name;
-    int n = cmdProj.size();
-    if (n == 0) return s;
+    double sum = 0;
+    for (double v : validLags) sum += v;
+    statsOut.avg = sum / m;
 
-    const auto cmdMinMax = std::minmax_element(cmdProj.begin(), cmdProj.end());
-    s.cmdSize = *cmdMinMax.second - *cmdMinMax.first;
+    double sqSum = 0;
+    for (double v : validLags) sqSum += (v - statsOut.avg) * (v - statsOut.avg);
+    statsOut.stdDev = std::sqrt(sqSum / m);
 
-    const auto fbMinMax = std::minmax_element(fbProj.begin(), fbProj.end());
-    s.fbSize = *fbMinMax.second - *fbMinMax.first;
-
-    s.sizeErr = s.fbSize - s.cmdSize;
-    s.valid = true;
-    return s;
-}
-
-QVector<DirectionStats> DataLoader::computeDirectionStats(const Dataset &data)
-{
-    QVector<DirectionStats> result;
-    if (data.isEmpty()) return result;
-
-    const bool hasX = data.axes.contains("X");
-    const bool hasY = data.axes.contains("Y");
-
-    if (hasX) {
-        const AxisChannel &ch = data.axes["X"];
-        result.append(computeOneDirection(
-            QString::fromUtf8("X (0\xc2\xb0\xe2\x86\x94""180\xc2\xb0)"),
-            ch.cmd, ch.fb));
+    QVector<double> sorted = validLags;
+    if (m % 2 == 1) {
+        std::nth_element(sorted.begin(), sorted.begin() + m / 2, sorted.end());
+        statsOut.median = sorted[m / 2];
+    } else {
+        std::nth_element(sorted.begin(), sorted.begin() + m / 2 - 1, sorted.end());
+        const double lower = sorted[m / 2 - 1];
+        const double upper = *std::min_element(sorted.begin() + m / 2,
+                                               sorted.end());
+        statsOut.median = (lower + upper) / 2.0;
     }
-    if (hasY) {
-        const AxisChannel &ch = data.axes["Y"];
-        result.append(computeOneDirection(
-            QString::fromUtf8("Y (90\xc2\xb0\xe2\x86\x94\xe2\x88\x92" "90\xc2\xb0)"),
-            ch.cmd, ch.fb));
-    }
-    if (hasX && hasY) {
-        const AxisChannel &chX = data.axes["X"];
-        const AxisChannel &chY = data.axes["Y"];
-        const int n = data.size();
-        const double inv_sqrt2 = 1.0 / std::sqrt(2.0);
-
-        QVector<double> cmdD1(n), fbD1(n), cmdD2(n), fbD2(n);
-        for (int i = 0; i < n; ++i) {
-            cmdD1[i] = (chX.cmd[i] + chY.cmd[i]) * inv_sqrt2;
-            fbD1[i]  = (chX.fb[i]  + chY.fb[i])  * inv_sqrt2;
-            cmdD2[i] = (-chX.cmd[i] + chY.cmd[i]) * inv_sqrt2;
-            fbD2[i]  = (-chX.fb[i]  + chY.fb[i])  * inv_sqrt2;
-        }
-        result.append(computeOneDirection(
-            QString::fromUtf8(
-                "\xe5\xaf\xb9\xe8\xa7\x92\xe7\xba\xbf""1 (45\xc2\xb0\xe2\x86\x94\xe2\x88\x92""135\xc2\xb0)"),
-            cmdD1, fbD1));
-        result.append(computeOneDirection(
-            QString::fromUtf8(
-                "\xe5\xaf\xb9\xe8\xa7\x92\xe7\xba\xbf""2 (135\xc2\xb0\xe2\x86\x94\xe2\x88\x92" "45\xc2\xb0)"),
-            cmdD2, fbD2));
-    }
-    return result;
+    statsOut.valid = true;
 }
 
 void DataLoader::computeResponseTime(Dataset &data, int maxLookaheadSamples)
@@ -497,6 +453,17 @@ void DataLoader::computeResponseTime(Dataset &data, int maxLookaheadSamples)
     for (auto &name : data.axisOrder) {
         AxisChannel &ch = data.axes[name];
         computeOneAxis(data.time, ch.cmd, ch.fb,
-                       ch.respLag, ch.bestIdx, maxLookaheadSamples);
+                       ch.respLag, ch.bestIdx, ch.stats, maxLookaheadSamples);
+
+        // 位置误差统计(全程)
+        double maxAbs = 0, sq = 0;
+        for (double e : ch.err) {
+            double a = std::abs(e);
+            if (a > maxAbs) maxAbs = a;
+            sq += e * e;
+        }
+        ch.stats.maxAbsErr = maxAbs;
+        ch.stats.rmsErr = ch.err.isEmpty() ? 0.0
+                                           : std::sqrt(sq / ch.err.size());
     }
 }

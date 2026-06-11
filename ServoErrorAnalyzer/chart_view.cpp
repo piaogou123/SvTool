@@ -32,6 +32,16 @@ static double niceStep(double approx)
     return mant * expo;
 }
 
+// QWheelEvent 取坐标的版本兼容封装(Qt 5.14 起才有 position())
+static QPointF wheelPos(const QWheelEvent *event)
+{
+#if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
+    return event->position();
+#else
+    return event->posF();
+#endif
+}
+
 void ChartView::calcTicks(double vMin, double vMax, int maxTicks,
                           double &first, double &step, int &count)
 {
@@ -44,7 +54,7 @@ void ChartView::calcTicks(double vMin, double vMax, int maxTicks,
     if (count > maxTicks * 2) count = maxTicks * 2;
 }
 
-// 12-color palette – first 3 are the canonical X/Y/C colours
+// 12 色调色板 — 前 3 色为约定的 X/Y/C 颜色
 static const QColor kPalette[] = {
     QColor(220, 30, 30),     // X — red
     QColor(0, 150, 0),       // Y — green
@@ -132,6 +142,18 @@ int ChartView::nearestIndex(double time) const
     return idx;
 }
 
+// --- mode/series helpers ------------------------------------------------
+
+bool ChartView::axisAvailable(const AxisChannel &ch) const
+{
+    return m_mode == Mode::PosError || ch.hasVelocity();
+}
+
+const QVector<double> &ChartView::seriesFor(const AxisChannel &ch) const
+{
+    return m_mode == Mode::PosError ? ch.err : ch.velErr;
+}
+
 // --- public API --------------------------------------------------------
 
 void ChartView::setAxisData(const Dataset &data)
@@ -152,22 +174,51 @@ void ChartView::setAxisData(const Dataset &data)
         m_visible[name] = true;
     }
 
-    if (data.isEmpty()) {
+    // 新文件没有速度数据时,速度模式自动退回位置误差
+    if (m_mode == Mode::VelError) {
+        bool anyVel = false;
+        for (const auto &name : m_axisNames)
+            if (m_data.axes[name].hasVelocity()) { anyVel = true; break; }
+        if (!anyVel) m_mode = Mode::PosError;
+    }
+
+    computeFullRange();
+    zoomReset();
+}
+
+void ChartView::setDisplayMode(Mode mode)
+{
+    if (mode == m_mode) return;
+    m_mode = mode;
+    m_cursorIdx = -1;
+    m_lastEmittedCursorIdx = -1;
+    computeFullRange();
+    zoomReset();
+}
+
+void ChartView::computeFullRange()
+{
+    if (m_data.isEmpty()) {
         m_fullXMin = 0; m_fullXMax = 1;
         m_fullYMin = -1; m_fullYMax = 1;
     } else {
-        m_fullXMin = data.time.first();
-        m_fullXMax = data.time.last();
+        m_fullXMin = m_data.time.first();
+        m_fullXMax = m_data.time.last();
 
         bool first = true;
+        m_fullYMin = -1; m_fullYMax = 1;
         for (const auto &name : m_axisNames) {
-            const QVector<double> &err = data.axes[name].err;
-            for (double v : err) {
+            if (!m_visible.value(name, true)) continue;
+            const AxisChannel &ch = m_data.axes[name];
+            if (!axisAvailable(ch)) continue;
+            for (double v : seriesFor(ch)) {
                 if (first) { m_fullYMin = m_fullYMax = v; first = false; }
-                else { if (v < m_fullYMin) m_fullYMin = v; if (v > m_fullYMax) m_fullYMax = v; }
+                else {
+                    if (v < m_fullYMin) m_fullYMin = v;
+                    if (v > m_fullYMax) m_fullYMax = v;
+                }
             }
         }
-        if (first) { m_fullYMin = -1; m_fullYMax = 1; }
     }
 
     double xPad = (m_fullXMax - m_fullXMin) * 0.02;
@@ -179,17 +230,21 @@ void ChartView::setAxisData(const Dataset &data)
     m_fullXMax += xPad;
     m_fullYMin -= yPad;
     m_fullYMax += yPad;
-
-    zoomReset();
 }
 
 void ChartView::setSeriesVisible(const QString &axis, bool visible)
 {
-    if (m_visible.contains(axis)) {
-        m_visible[axis] = visible;
+    if (!m_visible.contains(axis)) return;
+    m_visible[axis] = visible;
+
+    // 范围跟随可见轴;若用户已手动缩放则保留当前视野
+    computeFullRange();
+    if (!m_userZoomed) {
+        zoomReset();
+    } else {
         invalidateStaticCache();
+        update();
     }
-    update();
 }
 
 bool ChartView::isSeriesVisible(const QString &axis) const
@@ -203,6 +258,7 @@ void ChartView::zoomReset()
     m_viewXMax = m_fullXMax;
     m_viewYMin = m_fullYMin;
     m_viewYMax = m_fullYMax;
+    m_userZoomed = false;
     invalidateStaticCache();
     update();
 }
@@ -280,8 +336,7 @@ void ChartView::drawGrid(QPainter &p)
         p.setPen(Qt::black);
         font.setPixelSize(11);
         p.setFont(font);
-        p.drawText(xLabel, Qt::AlignHCenter,
-            QString::fromUtf8("\xe6\x97\xb6\xe9\x97\xb4 (s)"));  // 时间 (s)
+        p.drawText(xLabel, Qt::AlignHCenter, QString::fromUtf8("时间 (s)"));
         font.setPixelSize(10);
         p.setFont(font);
     }
@@ -311,8 +366,10 @@ void ChartView::drawGrid(QPainter &p)
         p.save();
         p.translate(12, m_plotArea.center().y());
         p.rotate(-90);
-        p.drawText(QRectF(-50, -10, 100, 20), Qt::AlignCenter,
-            QString::fromUtf8("\xe8\xaf\xaf\xe5\xb7\xae"));  // 误差
+        p.drawText(QRectF(-60, -10, 120, 20), Qt::AlignCenter,
+                   m_mode == Mode::PosError
+                       ? QString::fromUtf8("位置误差")
+                       : QString::fromUtf8("速度误差"));
         p.restore();
     }
 
@@ -345,6 +402,8 @@ void ChartView::drawCurves(QPainter &p)
     for (const QString &name : m_axisNames) {
         if (!m_visible.value(name, true)) continue;
         const AxisChannel &ch = m_data.axes[name];
+        if (!axisAvailable(ch)) continue;
+        const QVector<double> &series = seriesFor(ch);
 
         QPen pen(m_color[name], 1);
         p.setPen(pen);
@@ -353,7 +412,7 @@ void ChartView::drawCurves(QPainter &p)
         poly.reserve(visCount);
 
         for (int i = iBeg; i < iEnd; ++i)
-            poly.append(dataToWidget(t[i], ch.err[i]));
+            poly.append(dataToWidget(t[i], series[i]));
 
         if (poly.size() >= 2)
             p.drawPolyline(poly);
@@ -369,17 +428,21 @@ void ChartView::drawCurves(QPainter &p)
     QFont f = p.font();
     f.setPixelSize(12);
     p.setFont(f);
-    double lx = m_plotArea.right() - 150;
+    const QString suffix = m_mode == Mode::PosError
+        ? QString::fromUtf8(" 误差")
+        : QString::fromUtf8(" 速度误差");
+    double lx = m_plotArea.right() - 170;
     double ly = m_plotArea.top() + 5;
     for (const QString &name : m_axisNames) {
+        const AxisChannel &ch = m_data.axes[name];
+        if (!axisAvailable(ch)) continue;
         QColor c = m_color[name];
         p.setPen(c);
         p.setBrush(c);
         p.drawRect(QRectF(lx, ly, 16, 3));
         p.setPen(Qt::black);
-        // %1 误差
-        p.drawText(QRectF(lx + 20, ly - 7, 110, 16), Qt::AlignLeft,
-                   name + QString::fromUtf8(" \xe8\xaf\xaf\xe5\xb7\xae"));
+        p.drawText(QRectF(lx + 20, ly - 7, 130, 16), Qt::AlignLeft,
+                   name + suffix);
         ly += 18;
     }
     p.restore();
@@ -407,8 +470,10 @@ void ChartView::drawCursor(QPainter &p)
 
     for (const QString &name : m_axisNames) {
         if (!m_visible.value(name, true)) continue;
-        double err = m_data.axes[name].err[m_cursorIdx];
-        QPointF pt = dataToWidget(t, err);
+        const AxisChannel &ch = m_data.axes[name];
+        if (!axisAvailable(ch)) continue;
+        double v = seriesFor(ch)[m_cursorIdx];
+        QPointF pt = dataToWidget(t, v);
 
         QColor c = m_color[name];
         p.setPen(QPen(c.darker(150), 2));
@@ -463,11 +528,14 @@ void ChartView::mouseMoveEvent(QMouseEvent *event)
     m_cursorIdx = nearestIndex(t);
 
     if (m_cursorIdx != m_lastEmittedCursorIdx) {
-        QMap<QString, double> errors;
-        for (const QString &name : m_axisNames)
-            errors[name] = m_data.axes[name].err[m_cursorIdx];
+        QMap<QString, double> values;
+        for (const QString &name : m_axisNames) {
+            const AxisChannel &ch = m_data.axes[name];
+            if (!axisAvailable(ch)) continue;
+            values[name] = seriesFor(ch)[m_cursorIdx];
+        }
 
-        emit cursorMoved(m_data.time[m_cursorIdx], m_cursorIdx, errors);
+        emit cursorMoved(m_data.time[m_cursorIdx], m_cursorIdx, values);
         m_lastEmittedCursorIdx = m_cursorIdx;
     }
 
@@ -508,6 +576,7 @@ void ChartView::mouseReleaseEvent(QMouseEvent *event)
             m_viewXMax = std::max(x1, x2);
             m_viewYMin = std::min(y1, y2);
             m_viewYMax = std::max(y1, y2);
+            m_userZoomed = true;
             invalidateStaticCache();
         }
 
@@ -521,16 +590,17 @@ void ChartView::wheelEvent(QWheelEvent *event)
     if (!(event->modifiers() & Qt::ControlModifier)) return;
 
     double factor = (event->angleDelta().y() > 0) ? 0.85 : 1.0 / 0.85;
+    const QPointF pos = wheelPos(event);
 
     // Zoom toward cursor: anchor the data value under the cursor so it stays
     // in the same widget pixel.  Save old extents first — both endpoints must
     // be computed from the *original* values, not the already-mutated ones.
-    double cx = widgetToTime(event->pos().x());
+    double cx = widgetToTime(pos.x());
     double oldXMin = m_viewXMin, oldXMax = m_viewXMax;
     m_viewXMin = cx - (cx - oldXMin) * factor;
     m_viewXMax = cx + (oldXMax - cx) * factor;
 
-    double cy = widgetToValue(event->pos().y());
+    double cy = widgetToValue(pos.y());
     double oldYMin = m_viewYMin, oldYMax = m_viewYMax;
     m_viewYMin = cy - (cy - oldYMin) * factor;
     m_viewYMax = cy + (oldYMax - cy) * factor;
@@ -542,6 +612,7 @@ void ChartView::wheelEvent(QWheelEvent *event)
     if (m_viewYMin < m_fullYMin - yMargin) m_viewYMin = m_fullYMin - yMargin;
     if (m_viewYMax > m_fullYMax + yMargin) m_viewYMax = m_fullYMax + yMargin;
 
+    m_userZoomed = true;
     invalidateStaticCache();
     update();
 }

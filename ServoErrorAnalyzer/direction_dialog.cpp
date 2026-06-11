@@ -1,5 +1,6 @@
 #include "direction_dialog.h"
 #include "circularity_widget.h"
+#include "direction_defs.h"
 
 #include <QTableWidget>
 #include <QTableWidgetItem>
@@ -10,14 +11,7 @@
 #include <QFrame>
 #include <QFont>
 #include <QCheckBox>
-
-// Row colors aligned with direction-line colors used in the chart.
-static const QColor kRowColors[] = {
-    QColor(255, 230, 230),  // X  — light red
-    QColor(220, 245, 220),  // Y  — light green
-    QColor(255, 240, 210),  // D1 — light orange
-    QColor(235, 220, 250),  // D2 — light purple
-};
+#include <QComboBox>
 
 enum Col {
     kColName    = 0,
@@ -72,17 +66,23 @@ static QCheckBox *makeToggle(const QString &text, const QColor &color)
     return cb;
 }
 
+static QFrame *makeVSep(QWidget *parent)
+{
+    QFrame *sep = new QFrame(parent);
+    sep->setFrameShape(QFrame::VLine);
+    sep->setStyleSheet("color: #d0d0d0;");
+    return sep;
+}
+
 // -------------------------------------------------------------------------
 
 DirectionDialog::DirectionDialog(QWidget *parent)
     : QDialog(parent)
 {
     setupUi();
-    // 方向尺寸分析
-    setWindowTitle(QString::fromUtf8(
-        "\xe6\x96\xb9\xe5\x90\x91\xe5\xb0\xba\xe5\xaf\xb8\xe5\x88\x86\xe6\x9e\x90"));
-    resize(980, 880);
-    setMinimumSize(640, 540);
+    setWindowTitle(QString::fromUtf8("方向尺寸分析"));
+    resize(1000, 900);
+    setMinimumSize(660, 560);
 }
 
 void DirectionDialog::setupUi()
@@ -98,21 +98,12 @@ void DirectionDialog::setupUi()
     m_cardRoundness   = makeMetricCard(QColor(220,  60,  60));   // red
     m_cardAvgRadius   = makeMetricCard(QColor( 30, 110, 200));   // blue
     m_cardRadiusRange = makeMetricCard(QColor(120, 120, 130));   // gray
-
-    // Default placeholder content
-    setCardContent(m_cardRoundness,
-        QString::fromUtf8("\xe7\x9c\x9f\xe5\x9c\x86\xe5\xba\xa6"),  // 真圆度
-        "—", "mm", QColor(220, 60, 60));
-    setCardContent(m_cardAvgRadius,
-        QString::fromUtf8("\xe5\xb9\xb3\xe5\x9d\x87\xe5\x8d\x8a\xe5\xbe\x84"),  // 平均半径
-        "—", "mm", QColor(30, 110, 200));
-    setCardContent(m_cardRadiusRange,
-        QString::fromUtf8("\xe5\x8d\x8a\xe5\xbe\x84\xe8\x8c\x83\xe5\x9b\xb4"),  // 半径范围
-        "—", "min ~ max", QColor(120, 120, 130));
+    m_cardReversal    = makeMetricCard(QColor(240, 140,   0));   // orange
 
     cardRow->addWidget(m_cardRoundness, 1);
     cardRow->addWidget(m_cardAvgRadius, 1);
     cardRow->addWidget(m_cardRadiusRange, 1);
+    cardRow->addWidget(m_cardReversal, 1);
     root->addLayout(cardRow);
 
     // ====== Middle: circularity chart — takes all remaining space =========
@@ -120,62 +111,75 @@ void DirectionDialog::setupUi()
     m_chart->setMinimumSize(400, 400);
 
     // ====== Toolbar: visibility toggles for the chart ====================
-    // Colors mirror the trajectory / direction-line colors in the chart.
     QHBoxLayout *toolRow = new QHBoxLayout();
     toolRow->setSpacing(14);
 
-    // 显示:  (label prefix)
-    QLabel *toolLbl = new QLabel(
-        QString::fromUtf8("\xe6\x98\xbe\xe7\xa4\xba:"), this);  // 显示:
+    QLabel *toolLbl = new QLabel(QString::fromUtf8("显示:"), this);
     toolLbl->setStyleSheet("color: #555; font-weight: bold;");
     toolRow->addWidget(toolLbl);
 
-    // 指令(位置) trajectory — orange (matches command path)
+    // 指令(位置)轨迹 — 青色虚线
     QCheckBox *cbCmd = makeToggle(
-        QString::fromUtf8("\xe6\x8c\x87\xe4\xbb\xa4(\xe4\xbd\x8d\xe7\xbd\xae)"),
-        QColor(0, 160, 150));
+        QString::fromUtf8("指令(位置)"), QColor(0, 160, 150));
     connect(cbCmd, &QCheckBox::toggled,
             this, [this](bool on){ m_chart->setCommandVisible(on); });
     toolRow->addWidget(cbCmd);
 
-    // 反馈 trajectory — blue (matches feedback path)
+    // 反馈轨迹 — 蓝色实线
     QCheckBox *cbFb = makeToggle(
-        QString::fromUtf8("\xe5\x8f\x8d\xe9\xa6\x88"),
-        QColor(0, 80, 200));
+        QString::fromUtf8("反馈"), QColor(0, 80, 200));
     connect(cbFb, &QCheckBox::toggled,
             this, [this](bool on){ m_chart->setFeedbackVisible(on); });
     toolRow->addWidget(cbFb);
 
-    // Separator
-    QFrame *sep = new QFrame(this);
-    sep->setFrameShape(QFrame::VLine);
-    sep->setStyleSheet("color: #d0d0d0;");
-    toolRow->addWidget(sep);
+    // 基准圆(指令拟合圆)— 灰色点线
+    QCheckBox *cbRef = makeToggle(
+        QString::fromUtf8("基准圆"), QColor(120, 120, 125));
+    connect(cbRef, &QCheckBox::toggled,
+            this, [this](bool on){ m_chart->setReferenceVisible(on); });
+    toolRow->addWidget(cbRef);
 
-    // Per-direction size annotation toggles. Dir index matches the chart:
-    // 0=X, 1=Y, 2=对角线1, 3=对角线2. Colors mirror kDirClr in the chart.
-    const QColor dirClr[4] = {
-        QColor(220,  30,  30),   // X  — red
-        QColor(  0, 150,   0),   // Y  — green
-        QColor(240, 140,   0),   // 对角线1 — orange
-        QColor(140,  20, 200),   // 对角线2 — purple
-    };
-    // 尺寸 suffix
-    const QString sizeSfx =
-        QString::fromUtf8(" \xe5\xb0\xba\xe5\xaf\xb8");  // " 尺寸"
-    const QString diag = QString::fromUtf8("\xe5\xaf\xb9\xe8\xa7\x92\xe7\xba\xbf"); // 对角线
+    // 换向毛刺标记
+    QCheckBox *cbRev = makeToggle(
+        QString::fromUtf8("换向毛刺"), QColor(200, 90, 0));
+    connect(cbRev, &QCheckBox::toggled,
+            this, [this](bool on){ m_chart->setReversalVisible(on); });
+    toolRow->addWidget(cbRev);
+
+    toolRow->addWidget(makeVSep(this));
+
+    // 各方向尺寸标注开关(颜色/文案统一取自 dir_defs)
+    const QString sizeSfx = QString::fromUtf8(" 尺寸");
     const QString dirName[4] = {
         "X" + sizeSfx,
         "Y" + sizeSfx,
-        diag + "1" + sizeSfx,
-        diag + "2" + sizeSfx,
+        QString::fromUtf8("对角线1") + sizeSfx,
+        QString::fromUtf8("对角线2") + sizeSfx,
     };
-    for (int d = 0; d < 4; ++d) {
-        QCheckBox *cb = makeToggle(dirName[d], dirClr[d]);
+    for (int d = 0; d < dir_defs::kCount; ++d) {
+        QCheckBox *cb = makeToggle(dirName[d], dir_defs::color(d));
         connect(cb, &QCheckBox::toggled,
                 this, [this, d](bool on){ m_chart->setSizeVisible(d, on); });
         toolRow->addWidget(cb);
     }
+
+    toolRow->addWidget(makeVSep(this));
+
+    // 径向误差放大倍数(圆度仪式显示)
+    QLabel *magLbl = new QLabel(QString::fromUtf8("误差放大:"), this);
+    magLbl->setStyleSheet("color: #555; font-weight: bold;");
+    toolRow->addWidget(magLbl);
+
+    m_magCombo = new QComboBox(this);
+    const int mags[] = { 1, 5, 10, 20, 50, 100, 200, 500 };
+    for (int m : mags)
+        m_magCombo->addItem(QString::fromUtf8("×%1").arg(m), m);
+    connect(m_magCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            this, [this](int) {
+                m_chart->setMagnification(
+                    m_magCombo->currentData().toDouble());
+            });
+    toolRow->addWidget(m_magCombo);
 
     toolRow->addStretch(1);
     root->addLayout(toolRow);
@@ -183,11 +187,7 @@ void DirectionDialog::setupUi()
     root->addWidget(m_chart, 1);
 
     // ====== Bottom: "no data" placeholder ================================
-    m_lblNoData = new QLabel(
-        // 请先加载 CSV 文件
-        QString::fromUtf8(
-            "\xe8\xaf\xb7\xe5\x85\x88\xe5\x8a\xa0\xe8\xbd\xbd CSV \xe6\x96\x87\xe4\xbb\xb6"),
-        this);
+    m_lblNoData = new QLabel(QString::fromUtf8("请先加载 CSV 文件"), this);
     m_lblNoData->setAlignment(Qt::AlignCenter);
     m_lblNoData->setStyleSheet("color: #999; font-size: 13px; padding: 6px;");
     root->addWidget(m_lblNoData, 0);
@@ -197,17 +197,10 @@ void DirectionDialog::setupUi()
     m_table->setColumnCount(kColCount);
 
     QStringList hdrs;
-    // 方向
-    hdrs << QString::fromUtf8("\xe6\x96\xb9\xe5\x90\x91");
-    // 指令尺寸 (mm)
-    hdrs << QString::fromUtf8(
-        "\xe6\x8c\x87\xe4\xbb\xa4\xe5\xb0\xba\xe5\xaf\xb8 (mm)");
-    // 反馈尺寸 (mm)
-    hdrs << QString::fromUtf8(
-        "\xe5\x8f\x8d\xe9\xa6\x88\xe5\xb0\xba\xe5\xaf\xb8 (mm)");
-    // 尺寸偏差 (mm)
-    hdrs << QString::fromUtf8(
-        "\xe5\xb0\xba\xe5\xaf\xb8\xe5\x81\x8f\xe5\xb7\xae (mm)");
+    hdrs << QString::fromUtf8("方向");
+    hdrs << QString::fromUtf8("指令尺寸 (mm)");
+    hdrs << QString::fromUtf8("反馈尺寸 (mm)");
+    hdrs << QString::fromUtf8("尺寸偏差 (mm)");
 
     m_table->setHorizontalHeaderLabels(hdrs);
     m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Stretch);
@@ -224,6 +217,8 @@ void DirectionDialog::setupUi()
     m_table->hide();
 
     root->addWidget(m_table, 0);
+
+    updateMetricCards();
 }
 
 // -------------------------------------------------------------------------
@@ -274,7 +269,9 @@ void DirectionDialog::buildTable(const QVector<DirectionStats> &stats)
 
     for (int row = 0; row < stats.size(); ++row) {
         const DirectionStats &s = stats[row];
-        const QColor bg = kRowColors[row % 4];
+        // 行底色:方向色向白色混合 88%
+        const QColor bg = dir_defs::blendWhite(
+            dir_defs::color(row % dir_defs::kCount), 88);
 
         m_table->setItem(row, kColName,    makeCell(s.name, bg, true, 11));
         m_table->setItem(row, kColCmdSize, makeNumCell(s.cmdSize,   bg));
@@ -289,41 +286,35 @@ void DirectionDialog::buildTable(const QVector<DirectionStats> &stats)
 
 void DirectionDialog::updateMetricCards()
 {
-    if (!m_chart || !m_chart->hasData()) {
-        setCardContent(m_cardRoundness,
-            QString::fromUtf8("\xe7\x9c\x9f\xe5\x9c\x86\xe5\xba\xa6"),
-            "—", "mm", QColor(220, 60, 60));
-        setCardContent(m_cardAvgRadius,
-            QString::fromUtf8("\xe5\xb9\xb3\xe5\x9d\x87\xe5\x8d\x8a\xe5\xbe\x84"),
-            "—", "mm", QColor(30, 110, 200));
-        setCardContent(m_cardRadiusRange,
-            QString::fromUtf8("\xe5\x8d\x8a\xe5\xbe\x84\xe8\x8c\x83\xe5\x9b\xb4"),
-            "—", "min ~ max (mm)", QColor(120, 120, 130));
-        return;
-    }
-
-    double rd  = m_chart->roundness();
-    double avg = m_chart->avgRadius();
-    double rmn = m_chart->minRadius();
-    double rmx = m_chart->maxRadius();
+    const bool has = m_chart && m_chart->hasData();
 
     setCardContent(m_cardRoundness,
-        QString::fromUtf8("\xe7\x9c\x9f\xe5\x9c\x86\xe5\xba\xa6"),
-        QString::number(rd, 'f', 4),
-        QString::fromUtf8("mm  (\xe6\x9c\x80\xe5\xa4\xa7\xe2\x88\x92\xe6\x9c\x80\xe5\xb0\x8f\xe5\x8d\x8a\xe5\xbe\x84)"),  // mm (最大−最小半径)
+        QString::fromUtf8("真圆度"),
+        has ? QString::number(m_chart->roundness(), 'f', 4) : QString::fromUtf8("—"),
+        QString::fromUtf8("mm  (最大−最小半径, LSC)"),
         QColor(220, 60, 60), QColor(180, 40, 40));
 
     setCardContent(m_cardAvgRadius,
-        QString::fromUtf8("\xe5\xb9\xb3\xe5\x9d\x87\xe5\x8d\x8a\xe5\xbe\x84"),
-        QString::number(avg, 'f', 4),
-        QString::fromUtf8("mm  (\xe5\x8f\x8d\xe9\xa6\x88\xe8\xbd\xa8\xe8\xbf\xb9)"),  // mm (反馈轨迹)
+        QString::fromUtf8("平均半径"),
+        has ? QString::number(m_chart->avgRadius(), 'f', 4) : QString::fromUtf8("—"),
+        QString::fromUtf8("mm  (反馈轨迹)"),
         QColor(30, 110, 200), QColor(30, 90, 170));
 
     setCardContent(m_cardRadiusRange,
-        QString::fromUtf8("\xe5\x8d\x8a\xe5\xbe\x84\xe8\x8c\x83\xe5\x9b\xb4"),
-        QString("%1 ~ %2").arg(rmn, 0, 'f', 4).arg(rmx, 0, 'f', 4),
+        QString::fromUtf8("半径范围"),
+        has ? QString("%1 ~ %2")
+                  .arg(m_chart->minRadius(), 0, 'f', 4)
+                  .arg(m_chart->maxRadius(), 0, 'f', 4)
+            : QString::fromUtf8("—"),
         "mm",
         QColor(120, 120, 130), QColor(60, 60, 70));
+
+    const double rev = has ? m_chart->maxReversalDev() : -1.0;
+    setCardContent(m_cardReversal,
+        QString::fromUtf8("最大换向毛刺"),
+        rev >= 0 ? QString::number(rev, 'f', 4) : QString::fromUtf8("—"),
+        QString::fromUtf8("mm  (换向点±5°,对反馈拟合圆)"),
+        QColor(240, 140, 0), QColor(200, 110, 0));
 }
 
 // -------------------------------------------------------------------------
@@ -335,7 +326,7 @@ void DirectionDialog::updateData(const Dataset &data)
     m_chart->setData(data);
     updateMetricCards();
 
-    QVector<DirectionStats> stats = DataLoader::computeDirectionStats(data);
+    const QVector<DirectionStats> stats = m_chart->directionStats();
     if (stats.isEmpty()) {
         m_table->hide();
         m_lblNoData->show();
