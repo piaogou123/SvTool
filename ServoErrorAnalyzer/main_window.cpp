@@ -1,7 +1,6 @@
 #include "main_window.h"
 #include "chart_view.h"
 #include "data_loader.h"
-#include "diagnosis_dialog.h"
 #include "direction_dialog.h"
 
 #include <QMenuBar>
@@ -52,8 +51,6 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , m_dirDialog(nullptr)
     , m_dirAct(nullptr)
-    , m_diagDialog(nullptr)
-    , m_diagAct(nullptr)
 {
     setupUi();
 }
@@ -112,11 +109,6 @@ void MainWindow::setupToolBar()
     m_dirAct->setEnabled(false);
     connect(m_dirAct, &QAction::triggered,
             this, &MainWindow::onShowDirectionAnalysis);
-
-    m_diagAct = m_toolBar->addAction(QString::fromUtf8("诊断报告"));
-    m_diagAct->setEnabled(false);
-    connect(m_diagAct, &QAction::triggered,
-            this, &MainWindow::onShowDiagnosis);
 
     m_toolBar->addSeparator();
 
@@ -385,7 +377,6 @@ void MainWindow::loadFile(const QString &filePath)
     }
 
     m_curData = data;
-    m_curFilePath = filePath;
     rebuildAxisWidgets(data.axisOrder);
     rebuildStatsHtml();
 
@@ -400,11 +391,8 @@ void MainWindow::loadFile(const QString &filePath)
     m_chartView->setAxisData(data);
 
     m_dirAct->setEnabled(true);
-    m_diagAct->setEnabled(true);
     if (m_dirDialog && m_dirDialog->isVisible())
         m_dirDialog->updateData(m_curData);
-    if (m_diagDialog && m_diagDialog->isVisible())
-        m_diagDialog->updateData(m_curData, m_curFilePath);
 
     m_lblRespTitle->setText(QString::fromUtf8(
         "<b>响应时间</b>"
@@ -482,17 +470,6 @@ void MainWindow::onShowDirectionAnalysis()
     m_dirDialog->show();
     m_dirDialog->raise();
     m_dirDialog->activateWindow();
-}
-
-void MainWindow::onShowDiagnosis()
-{
-    if (!m_diagDialog) {
-        m_diagDialog = new DiagnosisDialog(this);
-    }
-    m_diagDialog->updateData(m_curData, m_curFilePath);
-    m_diagDialog->show();
-    m_diagDialog->raise();
-    m_diagDialog->activateWindow();
 }
 
 // --- Drag-and-drop on the main window itself ---------------------------

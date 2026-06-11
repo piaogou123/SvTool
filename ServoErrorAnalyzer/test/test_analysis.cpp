@@ -1,19 +1,14 @@
 // 冒烟 + 精度验证测试(离屏):
-//  1) 合成数据(已知真值 Kv/前馈)验证三个等效增益估计器的精度
-//  2) 参数 sidecar JSON 读写往返
-//  3) 真实 CSV:解析/统计/圆分析/诊断/渲染 无崩溃
+//  1) 合成数据(已知真值)验证圆分析:拟合半径 / 进退刀剔除 / 弧度覆盖
+//  2) 真实 CSV:解析 / 统计 / 圆分析 / 渲染 无崩溃
 // 退出码 = 失败断言数(0 = 全部通过)
 #include <QApplication>
-#include <QFile>
 #include <cmath>
 #include <cstdio>
 #include "../data_loader.h"
 #include "../chart_view.h"
 #include "../circle_analysis.h"
 #include "../circularity_widget.h"
-#include "../diagnosis.h"
-#include "../diagnosis_dialog.h"
-#include "../servo_params.h"
 
 static int g_failures = 0;
 
@@ -149,7 +144,7 @@ static Dataset makeSynth(const SynthSpec &s)
 
 static void testSynthetic()
 {
-    std::printf("=== T1 合成: Kv=30/40, ff=0, 带进刀段 ===\n");
+    std::printf("=== T1 合成: Kv=30/40, 带进刀段(圆拟合与剔除)===\n");
     {
         SynthSpec sp;
         sp.kvx = 30; sp.kvy = 40;
@@ -162,22 +157,9 @@ static void testSynthetic()
         check(ca.filtered, "filtered(进刀段被剔除)", ca.filtered, 1, 0);
         checkRel("refR", ca.refR, sp.R, 0.002);
         checkRel("avgFeed", ca.avgFeed, sp.feed, 0.01);
-
-        const AxisKvEstimate ex =
-            Diagnosis::estimateAxisKv("X", ds, ds.axes["X"]);
-        const AxisKvEstimate ey =
-            Diagnosis::estimateAxisKv("Y", ds, ds.axes["Y"]);
-        check(ex.regValid, "X regValid", ex.regValid, 1, 0);
-        checkRel("X kvReg", ex.kvReg, 30.0, 0.03);
-        checkRange("X r2", ex.r2, 0.98, 1.0);
-        checkRel("Y kvReg", ey.kvReg, 40.0, 0.03);
-        // 时滞法:理论滞后 atan(ω/Kv)/ω
-        checkRel("X kvLag", ex.kvLag, 30.0, 0.12);
-        checkRel("Y kvLag", ey.kvLag, 40.0, 0.12);
-        check(ex.consistent, "X 两法一致", ex.consistent, 1, 0);
     }
 
-    std::printf("=== T2 合成: Kv=35/35, ff=0(收缩法精度)===\n");
+    std::printf("=== T2 合成: Kv=35/35 整圆(覆盖角/收缩量)===\n");
     {
         SynthSpec sp;
         sp.kvx = sp.kvy = 35;
@@ -186,51 +168,16 @@ static void testSynthetic()
 
         CircleAnalysis ca;
         ca.compute(ds);
-        const ShrinkEstimate se = Diagnosis::estimateFromShrink(ca);
-        check(se.valid && !se.lowerBoundOnly, "shrink valid", se.valid, 1, 0);
+        check(ca.circleFitOk, "circleFitOk", ca.circleFitOk, 1, 0);
         checkRange("arcCoverageDeg(整圆)", ca.arcCoverageDeg, 350, 360);
-        // 理论:ΔR = R(1 − Kv/√(Kv²+ω²)),ω = v/R = 2 rad/s
+        // 理论半径收缩:ΔR = R(1 − Kv/√(Kv²+ω²)),ω = v/R = 2 rad/s
         const double om = (sp.feed / 60.0) / sp.R;
         const double dRtheory =
             sp.R * (1.0 - sp.kvx / std::sqrt(sp.kvx * sp.kvx + om * om));
-        checkRel("deltaR vs 理论", se.deltaR, dRtheory, 0.05);
-        checkRel("kv(收缩法)", se.kv, 35.0, 0.03);
+        checkRel("refR-fbR vs 理论收缩", ca.refR - ca.fbR, dRtheory, 0.05);
     }
 
-    std::printf("=== T3 合成: Kv=30/30, ff=50%%(前馈下的等效值)===\n");
-    {
-        SynthSpec sp;
-        sp.kvx = sp.kvy = 30;
-        sp.ffx = sp.ffy = 0.5;
-        sp.warmupRevs = 1.0;
-        const Dataset ds = makeSynth(sp);
-
-        const AxisKvEstimate ex =
-            Diagnosis::estimateAxisKv("X", ds, ds.axes["X"]);
-        // 回归等效 = Kv/(1−ff) = 60
-        checkRel("X kvReg (=Kv/(1-ff))", ex.kvReg, 60.0, 0.03);
-
-        CircleAnalysis ca;
-        ca.compute(ds);
-        const ShrinkEstimate se = Diagnosis::estimateFromShrink(ca);
-        // 收缩法按无前馈模型反解:理论 = Kv/√(1−ff²) = 30/√0.75 = 34.64
-        const double expect = 30.0 / std::sqrt(1.0 - 0.5 * 0.5);
-        checkRel("kv(收缩法, =Kv/sqrt(1-ff^2))", se.kv, expect, 0.05);
-    }
-
-    std::printf("=== T4 合成: Kv=30/40 混合(收缩法给双轴平均)===\n");
-    {
-        SynthSpec sp;
-        sp.kvx = 30; sp.kvy = 40;
-        sp.warmupRevs = 1.0;
-        const Dataset ds = makeSynth(sp);
-        CircleAnalysis ca;
-        ca.compute(ds);
-        const ShrinkEstimate se = Diagnosis::estimateFromShrink(ca);
-        checkRange("kv(收缩法) 介于两轴之间", se.kv, 30.0 * 0.97, 40.0 * 1.03);
-    }
-
-    std::printf("=== T4b 合成: 1/4 圆弧(收缩法必须被拒绝)===\n");
+    std::printf("=== T3 合成: 1/4 圆弧(覆盖角识别)===\n");
     {
         SynthSpec sp;
         sp.kvx = sp.kvy = 35;
@@ -241,59 +188,7 @@ static void testSynthetic()
         check(ca.circleFitOk, "circleFitOk(1/4 圆弧可拟合)",
               ca.circleFitOk, 1, 0);
         checkRange("arcCoverageDeg(约 90°)", ca.arcCoverageDeg, 60, 130);
-        const ShrinkEstimate se = Diagnosis::estimateFromShrink(ca);
-        check(!se.valid, "shrink 被覆盖角防线拒绝", se.valid, 0, 0);
     }
-}
-
-static void testParamsJson()
-{
-    std::printf("=== T5 参数 sidecar JSON 往返 ===\n");
-    ServoParams p;
-    p.brandIndex = servo_brands::indexOfId("fanuc");
-    AxisParams ax;
-    ax.posLoopGain = 3000; ax.hasGain = true;       // FANUC 0.01/s → 30/s
-    ax.velFF = 50;        ax.hasFF = true;
-    ax.frictionComp = 12; ax.hasFrictionComp = true;
-    p.axes["X"] = ax;
-
-    const QString path = "._test_params.json";
-    QString err;
-    check(p.saveTo(path, &err), "saveTo", 1, 1, 0);
-
-    ServoParams q;
-    check(q.loadFrom(path), "loadFrom", 1, 1, 0);
-    check(q.brandIndex == p.brandIndex, "brand 往返", q.brandIndex,
-          p.brandIndex, 0);
-    checkRel("gainSI (3000 x 0.01)", q.gainSI("X"), 30.0, 1e-9);
-    check(q.axes["X"].hasFF && q.axes["X"].velFF == 50, "velFF 往返",
-          q.axes["X"].velFF, 50, 0);
-    check(q.axes["X"].hasFrictionComp, "frictionComp 往返",
-          q.axes["X"].frictionComp, 12, 0);
-    check(!q.axes["X"].hasBacklashComp, "未录入字段不被虚构",
-          q.axes["X"].hasBacklashComp, 0, 0);
-    QFile::remove(path);
-
-    // 品牌单位换算(依据各厂商手册,见 servo_params.cpp 注释)
-    auto gainOf = [](const char *brand, double v) {
-        ServoParams sp;
-        sp.brandIndex = servo_brands::indexOfId(brand);
-        AxisParams a;
-        a.posLoopGain = v;
-        a.hasGain = true;
-        sp.axes["X"] = a;
-        return sp.gainSI("X");
-    };
-    checkRel("汇川 H08-02 64.0Hz → 64/s", gainOf("inovance", 64.0),
-             64.0, 1e-9);
-    checkRel("AKD PL.KP 100 → 100/s", gainOf("akd", 100.0), 100.0, 1e-9);
-    checkRel("AKD2G PL.KP 10Hz → 62.83/s", gainOf("akd2g", 10.0),
-             62.8319, 1e-4);
-    checkRel("安川 Pn102 400 → 40/s", gainOf("yaskawa", 400.0), 40.0, 1e-9);
-    checkRel("SIEMENS Kv 1 → 16.67/s", gainOf("siemens", 1.0),
-             16.6667, 1e-4);
-    check(servo_brands::indexOfId("unknown-id") == 0,
-          "未知品牌回退到通用", servo_brands::indexOfId("unknown-id"), 0, 0);
 }
 
 static void testRealFile(const char *path)
@@ -328,42 +223,7 @@ static void testRealFile(const char *path)
         }
     }
 
-    const DiagnosisResult res =
-        Diagnosis::run(data, ca, ServoParams(), "test");
-    for (const AxisKvEstimate &e : res.axes)
-        std::printf("kv[%s]: reg=%.1f(r2=%.2f,n=%d) lag=%.1f best=%.1f\n",
-                    qPrintable(e.axis), e.kvReg, e.r2, e.samples,
-                    e.kvLag, e.best());
-    if (res.shrink.valid)
-        std::printf("shrink: kv=%.1f dR=%.4f%s\n", res.shrink.kv,
-                    res.shrink.deltaR,
-                    res.shrink.lowerBoundOnly ? " (lower bound)" : "");
-    else
-        std::printf("shrink: n/a (%s)\n", qPrintable(res.shrink.note));
-    check(res.html.size() > 2000, "报告 HTML 非空", res.html.size(), 2000, 0);
-
-    // TEST_EXPORT=1 时导出报告供人工检查(含录入参数的完整路径)
-    if (qEnvironmentVariableIsSet("TEST_EXPORT")) {
-        ServoParams sp;
-        sp.brandIndex = servo_brands::indexOfId("fanuc");
-        AxisParams ax;
-        ax.posLoopGain = 3000; ax.hasGain = true;   // 30/s
-        ax.velFF = 0; ax.hasFF = true;
-        ax.frictionComp = 10; ax.hasFrictionComp = true;
-        sp.axes["X"] = ax;
-        ax.velFF = 95; sp.axes["Y"] = ax;
-        const DiagnosisResult res2 = Diagnosis::run(data, ca, sp, "export");
-        QFile f("._report_export.html");
-        if (f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-            f.write("<!DOCTYPE html><html><head><meta charset=\"utf-8\">"
-                    "</head><body>");
-            f.write(res2.html.toUtf8());
-            f.write("</body></html>");
-            std::printf("report exported: ._report_export.html\n");
-        }
-    }
-
-    // 离屏渲染:圆度图 + 误差图 + 诊断对话框
+    // 离屏渲染:圆度图 + 误差图
     CircularityWidget w;
     w.resize(900, 700);
     w.setData(data);
@@ -377,11 +237,6 @@ static void testRealFile(const char *path)
     cv.grab();
     cv.setDisplayMode(ChartView::Mode::VelError);
     cv.grab();
-
-    DiagnosisDialog dlg;
-    dlg.resize(950, 850);
-    dlg.updateData(data, QString());   // 空路径:测试中不写 sidecar
-    dlg.grab();
     std::printf("render: ok\n");
 }
 
@@ -390,7 +245,6 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
 
     testSynthetic();
-    testParamsJson();
 
     for (int i = 1; i < argc; ++i)
         testRealFile(argv[i]);

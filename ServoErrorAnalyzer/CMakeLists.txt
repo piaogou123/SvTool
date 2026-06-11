@@ -18,9 +18,6 @@ add_executable(ServoErrorAnalyzer
     data_loader.h data_loader.cpp
     chart_view.h chart_view.cpp
     circle_analysis.h circle_analysis.cpp
-    servo_params.h servo_params.cpp
-    diagnosis.h diagnosis.cpp
-    diagnosis_dialog.h diagnosis_dialog.cpp
     direction_defs.h
     direction_dialog.h direction_dialog.cpp
     circularity_widget.h circularity_widget.cpp

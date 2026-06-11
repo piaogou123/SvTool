@@ -6,7 +6,6 @@
 
 class ChartView;
 class DirectionDialog;
-class DiagnosisDialog;
 class QCheckBox;
 class QComboBox;
 class QLabel;
@@ -29,7 +28,6 @@ private slots:
     void onVisibilityChanged();
     void onModeChanged(int index);
     void onShowDirectionAnalysis();
-    void onShowDiagnosis();
 
 private:
     void loadFile(const QString &filePath);
@@ -71,11 +69,6 @@ protected:
     DirectionDialog *m_dirDialog;
     QAction         *m_dirAct;
 
-    // Servo diagnosis dialog (non-modal, created on first use)
-    DiagnosisDialog *m_diagDialog;
-    QAction         *m_diagAct;
-
     // Data
     Dataset    m_curData;
-    QString    m_curFilePath;
 };
