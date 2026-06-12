@@ -131,6 +131,7 @@ private:
 
     // Colors
     QColor m_gridColor;
+    QColor m_minorGridColor;   // 次级网格(主刻度间细分)
     QColor m_bgColor;
 
     // Cached chart without the cursor/rubber band. Large CSV files are costly

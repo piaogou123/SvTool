@@ -33,7 +33,7 @@ static QLabel *makeAxisResponseLabel(const QColor &color)
         "QLabel { background: %1; border-radius: 6px; padding: 10px; "
         "color: #fff; font-size: 12px; }"
     ).arg(color.name()));
-    lbl->setMinimumHeight(150);
+    lbl->setMinimumHeight(120);
     lbl->setWordWrap(true);
     return lbl;
 }
@@ -270,50 +270,6 @@ void MainWindow::rebuildAxisWidgets(const QStringList &axisNames)
     }
 }
 
-// 每轴全程统计 HTML(载入时生成一次,光标移动时直接拼接)
-void MainWindow::rebuildStatsHtml()
-{
-    m_statsHtml.clear();
-    for (const QString &name : m_curData.axisOrder) {
-        const AxisChannel &ch = m_curData.axes[name];
-        const ResponseStats &st = ch.stats;
-        const QString posUnit =
-            (name == "C" || name == "A") ? "deg" : "mm";
-
-        QString html = QString::fromUtf8(
-            "<div style='font-weight:bold;font-size:14px;margin-bottom:2px;'>"
-            "%1 轴</div>"
-            "<div style='font-size:11px;opacity:0.85;margin-bottom:2px;'>"
-            "── 全程统计 ──</div>").arg(name);
-
-        if (st.valid) {
-            html += QString::fromUtf8(
-                "<table style='font-size:11px;' cellspacing=1>"
-                "<tr><td>平均响应</td><td align=right><b>%1</b></td></tr>"
-                "<tr><td>最大响应</td><td align=right>%2</td></tr>"
-                "<tr><td>中位数</td><td align=right>%3</td></tr>"
-                "<tr><td>标准差</td><td align=right>%4</td></tr>"
-                "<tr><td>无响应点</td><td align=right>%5 / %6</td></tr>"
-                "<tr><td>最大|误差|</td><td align=right><b>%7 %9</b></td></tr>"
-                "<tr><td>RMS 误差</td><td align=right>%8 %9</td></tr>"
-                "</table>")
-                .arg(fmtMs(st.avg))
-                .arg(fmtMs(st.max))
-                .arg(fmtMs(st.median))
-                .arg(fmtMs(st.stdDev))
-                .arg(st.noRespCount)
-                .arg(st.movingCount + st.noRespCount)
-                .arg(st.maxAbsErr, 0, 'f', 6)
-                .arg(st.rmsErr, 0, 'f', 6)
-                .arg(posUnit);
-        } else {
-            html += QString::fromUtf8(
-                "<div style='font-size:11px;'><i>无运动段</i></div>");
-        }
-        m_statsHtml[name] = html;
-    }
-}
-
 // --- Slots -------------------------------------------------------------
 
 void MainWindow::onOpenFile()
@@ -428,7 +384,6 @@ void MainWindow::loadFile(const QString &filePath)
     // 先交给图表分配曲线颜色,rebuildAxisWidgets 取色时才一致
     m_chartView->setAxisData(data);
     rebuildAxisWidgets(data.axisOrder);
-    rebuildStatsHtml();
 
     // 速度曲线开关仅在文件含速度列时可用
     const bool hasVel = m_chartView->dataHasVelocity();
@@ -442,7 +397,7 @@ void MainWindow::loadFile(const QString &filePath)
     m_lblRespTitle->setText(QString::fromUtf8(
         "<b>响应时间</b>"
         "  <span style='color:#888;font-size:11px;'>"
-        "(全程统计 + 光标点详情)</span>"));
+        "(光标点详情)</span>"));
 
     QFileInfo fi(filePath);
     m_lblFileInfo->setText(
@@ -467,10 +422,9 @@ void MainWindow::updateResponseAt(int idx)
         double resp = ch.respLag[idx];
         const bool noResp = std::isnan(resp);
 
-        QString html = m_statsHtml.value(name);
-        html += QString::fromUtf8(
-            "<div style='font-size:11px;opacity:0.85;margin-top:4px;"
-            "margin-bottom:2px;'>── 光标点详情 ──</div>");
+        QString html = QString::fromUtf8(
+            "<div style='font-weight:bold;font-size:14px;margin-bottom:4px;'>"
+            "%1 轴</div>").arg(name);
 
         if (noResp) {
             html += QString::fromUtf8(

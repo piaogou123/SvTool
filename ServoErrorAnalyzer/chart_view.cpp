@@ -109,7 +109,8 @@ ChartView::ChartView(QWidget *parent)
     , m_lastEmittedCursorIdx(-1)
     , m_cursorVisible(false)
     , m_rubberBand(false)
-    , m_gridColor(220, 220, 220)
+    , m_gridColor(190, 190, 190)
+    , m_minorGridColor(226, 226, 226)
     , m_bgColor(252, 252, 252)
     , m_staticCacheDirty(true)
 {
@@ -466,6 +467,10 @@ void ChartView::drawGrid(QPainter &p)
     const double ml = m_plotArea.left();
 
     QPen pen(m_gridColor, 1);
+    // 次级网格(主刻度间细分):比主网格更浅,营造示波器密格效果
+    QPen minorPen(m_minorGridColor, 1, Qt::SolidLine);
+    // 每个主刻度间的细分格数(同 AKD 示波器,5 等分)
+    constexpr int kMinorDiv = 5;
     QFont font = p.font();
     font.setPixelSize(10);
     p.setFont(font);
@@ -476,6 +481,23 @@ void ChartView::drawGrid(QPainter &p)
         double first, step; int count;
         calcTicks(m_viewXMin * 1000.0, m_viewXMax * 1000.0, 8,
                   first, step, count);
+
+        // 次级竖网格线(主刻度之间 5 等分)
+        p.save();
+        p.setClipRect(m_plotArea);
+        p.setPen(minorPen);
+        const double minorStep = step / kMinorDiv;
+        for (int i = -1; i < count; ++i) {
+            for (int k = 1; k < kMinorDiv; ++k) {
+                double valMs = first + i * step + k * minorStep;
+                double val = valMs / 1000.0;
+                if (val < m_viewXMin || val > m_viewXMax) continue;
+                const double x = xToPx(val);
+                p.drawLine(QPointF(x, m_plotArea.top()),
+                           QPointF(x, m_plotArea.bottom()));
+            }
+        }
+        p.restore();
 
         for (int i = 0; i < count; ++i) {
             double valMs = first + i * step;
@@ -508,7 +530,24 @@ void ChartView::drawGrid(QPainter &p)
     // --- 位置误差轴(内侧):横向网格线 + 蓝色刻度值 -----------------------
     {
         double first, step; int count;
-        calcTicks(m_viewPosMin, m_viewPosMax, 7, first, step, count);
+        calcTicks(m_viewPosMin, m_viewPosMax, 8, first, step, count);
+
+        // 次级横网格线(主刻度之间 5 等分);全幅横线只画一次,
+        // 速度轴的次级刻度后面单独在其轴线上短画
+        p.save();
+        p.setClipRect(m_plotArea);
+        p.setPen(minorPen);
+        const double minorStep = step / kMinorDiv;
+        for (int i = -1; i < count; ++i) {
+            for (int k = 1; k < kMinorDiv; ++k) {
+                double val = first + i * step + k * minorStep;
+                if (val < m_viewPosMin || val > m_viewPosMax) continue;
+                const double y = posToPx(val);
+                p.drawLine(QPointF(m_plotArea.left(), y),
+                           QPointF(m_plotArea.right(), y));
+            }
+        }
+        p.restore();
 
         const QColor posLabelClr(30, 70, 180);
         for (int i = 0; i < count; ++i) {
@@ -549,14 +588,26 @@ void ChartView::drawGrid(QPainter &p)
                    QPointF(axisX, m_plotArea.bottom()));
 
         double first, step; int count;
-        calcTicks(m_viewVelMin, m_viewVelMax, 7, first, step, count);
+        calcTicks(m_viewVelMin, m_viewVelMax, 8, first, step, count);
+
+        // 速度轴次级短刻度(主刻度之间 5 等分)
+        const double minorStep = step / kMinorDiv;
+        p.setPen(QPen(QColor(170, 170, 170), 1));
+        for (int i = -1; i < count; ++i) {
+            for (int k = 1; k < kMinorDiv; ++k) {
+                double val = first + i * step + k * minorStep;
+                if (val < m_viewVelMin || val > m_viewVelMax) continue;
+                const double y = velToPx(val);
+                p.drawLine(QPointF(axisX - 2, y), QPointF(axisX + 2, y));
+            }
+        }
 
         for (int i = 0; i < count; ++i) {
             double val = first + i * step;
             if (val < m_viewVelMin || val > m_viewVelMax) continue;
             const double y = velToPx(val);
             p.setPen(QPen(QColor(120, 120, 120), 1));
-            p.drawLine(QPointF(axisX - 3, y), QPointF(axisX + 3, y));
+            p.drawLine(QPointF(axisX - 4, y), QPointF(axisX + 4, y));
             p.setPen(Qt::black);
             QRectF labelRect(axisX - 70, y - 8, 64, 16);
             p.drawText(labelRect, Qt::AlignRight | Qt::AlignVCenter,

@@ -38,7 +38,6 @@ private:
     void setupStatusBar();
     void updateResponseAt(int idx);
     void rebuildAxisWidgets(const QStringList &axisNames);
-    void rebuildStatsHtml();
 
 protected:
     void dragEnterEvent(QDragEnterEvent *event) override;
@@ -63,7 +62,6 @@ protected:
     QWidget     *m_respContainer;
     QVBoxLayout *m_respLayout;
     QMap<QString, QLabel*> m_lblResp;
-    QMap<QString, QString> m_statsHtml;   // 每轴统计 HTML(载入时生成一次)
 
     // Direction analysis dialog (non-modal, created on first use)
     DirectionDialog *m_dirDialog;
